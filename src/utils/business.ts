@@ -1,0 +1,419 @@
+import { User, Role, ValueCreationLog, MiningResource, RefineCategory, AuditStatus } from '../../types';
+import { isSystemAdmin } from './accessControl';
+import { TIER_COEFFICIENTS } from '../constants/coefficients';
+import { roundMoney } from './formatMoney';
+import { normalizeRefineTier, resolveLogRefineTier } from './consumptionHedge';
+import {
+  getInitialRevenueCapacity,
+  getInitialValueCapacity,
+  getCurrentRevenueCapacity,
+  getCurrentValueCapacity,
+  getCWeightRevenue,
+  getCWeightValue,
+  getB2WeightValue
+} from './miningCapacity';
+ 
+export interface DualTrackMiningContext {
+  miningId: string;
+  originalRevenueLimit: number;
+  npcRevenueStatus: '100%' | '据实';
+  npcRevenueOverrideValue: number;
+  totalConfirmedRevenue: number;
+  cRevenuePointsList: number[];
+  
+  originalValueLimit: number;
+  npcValueStatus: '100%' | '据实';
+  npcValueOverrideValue: number;
+  totalConfirmedValue: number;
+  cValuePointsList: number[];
+}
+
+export function calculateDualTrackCoreMatrices(mining: DualTrackMiningContext) {
+  const updatedRevenueLimit = Math.max(
+    mining.npcRevenueStatus === '据实' ? mining.npcRevenueOverrideValue : mining.originalRevenueLimit,
+    mining.totalConfirmedRevenue
+  );
+
+  const updatedValueLimit = Math.max(
+    mining.npcValueStatus === '据实' ? mining.npcValueOverrideValue : mining.originalValueLimit,
+    mining.totalConfirmedValue
+  );
+
+  // N = round(款初) (款初已是净值)
+  const N = Math.round(updatedRevenueLimit);
+
+  const sumCRevenuePoints = mining.cRevenuePointsList.reduce((sum, p) => sum + p, 0);
+  const sumCValuePoints = mining.cValuePointsList.reduce((sum, p) => sum + p, 0);
+
+  // C权 = (N − ΣC) / N (N=0 时 C权=1)
+  const cRevenueWeight = N > 0 ? Math.max(0, (N - sumCRevenuePoints) / N) : 1;
+  const cValueWeight = N > 0 ? Math.max(0, (N - sumCValuePoints) / N) : 1;
+
+  return {
+    updatedRevenueLimit: roundMoney(updatedRevenueLimit),
+    updatedValueLimit: roundMoney(updatedValueLimit),
+    cRevenueWeight: Number(cRevenueWeight.toFixed(6)),
+    cValueWeight: Number(cValueWeight.toFixed(6))
+  };
+}
+
+interface KFactorValueTrackContext {
+  miningId: string;
+  updatedValueLimit: number;
+  b2PointsList: number[];
+  experts: Array<{
+    expertId: string;
+    rank: 'Junior' | 'Mid' | 'High';
+    initialValue: number;
+  }>;
+}
+
+export function calculateT1PlusRevenue(amount: number, isHighExpert: boolean, tierInput: string, cWeight: number) {
+  const coeffs = isHighExpert ? TIER_COEFFICIENTS.REVENUE_HIGH : TIER_COEFFICIENTS.REVENUE_MID_INITIAL;
+  const tier = normalizeRefineTier(tierInput);
+  const rates = { T1: coeffs.Enterprise, T2: coeffs.Bidding, T3: coeffs.SafetyEval };
+  const rate = rates[tier] || coeffs.SafetyEval;
+  // REMOVED: TIER_COEFFICIENTS.BASE_LOSS
+  return amount * rate * cWeight;
+}
+
+export function calculateT1PlusValue(amount: number, isHighExpert: boolean, tierInput: string, cWeight: number, b2Weight: number) {
+  const coeffs = isHighExpert ? TIER_COEFFICIENTS.VALUE_MANAGER : TIER_COEFFICIENTS.VALUE_CHAN;
+  const tier = normalizeRefineTier(tierInput);
+  const rates = { T1: coeffs.Enterprise, T2: coeffs.Bidding, T3: coeffs.SafetyEval };
+  const rate = rates[tier] || coeffs.SafetyEval;
+  // REMOVED: TIER_COEFFICIENTS.BASE_LOSS
+  return amount * rate * cWeight * b2Weight;
+}
+
+export const calculateHistoricalNetValue = (log: ValueCreationLog, resources: MiningResource[], managedUsers: User[]) => {
+  if (!log) return 0;
+  const resource = (resources || []).find(r => r && r.id === log.miningId);
+  const collector = (managedUsers || []).find(u => u && (u.id === log.recordedCollectorId || u.userId === log.recordedCollectorId));
+  
+  if (!collector) return log.netValue || 0;
+
+  const isHighValueExpert = (collector.category || '').includes('高产专') || ((collector.secondaryRoles as string[]) || []).includes('高产专');
+  const isHighRevenueExpert = (collector.category || '').includes('高款专') || ((collector.secondaryRoles as string[]) || []).includes('高款专');
+  const isRevenueSpecialist = (collector.category || '').includes('款专') || ((collector.secondaryRoles as string[]) || []).includes('款专');
+
+  let factor = 0;
+  if (resource) {
+    if (log.category === RefineCategory.Value || (log.category as string) === 'Value' || (log.category as string) === '产值') {
+      if (resource.refineTypeFactors?.[log.type]?.customValueFactor !== undefined) {
+        factor = resource.refineTypeFactors[log.type]!.customValueFactor!;
+      } else if (resource.customValueFactor !== undefined) {
+        factor = resource.customValueFactor;
+      }
+    } else if (log.category === RefineCategory.Revenue || (log.category as string) === 'Revenue' || (log.category as string) === '收款') {
+      if (resource.refineTypeFactors?.[log.type]?.customRevenueFactor !== undefined) {
+        factor = resource.refineTypeFactors[log.type]!.customRevenueFactor!;
+      } else if (resource.customRevenueFactor !== undefined) {
+        factor = resource.customRevenueFactor;
+      }
+    }
+  }
+
+  if (factor === 0) {
+    const tier = resolveLogRefineTier(log);
+    if (log.category === RefineCategory.Value || (log.category as string) === 'Value' || (log.category as string) === '产值') {
+      // Use TIER_COEFFICIENTS here
+      const coeffs = isHighValueExpert ? TIER_COEFFICIENTS.VALUE_MANAGER : TIER_COEFFICIENTS.VALUE_CHAN;
+      if (tier === 'T1') factor = coeffs.Enterprise;
+      else if (tier === 'T2') factor = coeffs.Bidding;
+      else if (tier === 'T3') factor = coeffs.SafetyEval;
+      else factor = coeffs.SafetyEval;
+    } else {
+      const coeffs = isHighRevenueExpert ? TIER_COEFFICIENTS.REVENUE_HIGH : isRevenueSpecialist ? TIER_COEFFICIENTS.REVENUE_MID_INITIAL : TIER_COEFFICIENTS.REVENUE_HIGH;
+      if (tier === 'T1') factor = coeffs.Enterprise;
+      else if (tier === 'T2') factor = coeffs.Bidding;
+      else if (tier === 'T3') factor = coeffs.SafetyEval;
+      else factor = coeffs.SafetyEval;
+    }
+  }
+
+  const weight = log.cClassRatio || 1;
+  const b2Weight = (log.category === RefineCategory.Value || (log.category as string) === 'Value' || (log.category as string) === '产值') ? (log.b2ClassRatio || 1) : 1;
+  const baseAmount = calculateInjectedAmount(log); 
+  return baseAmount * weight * b2Weight * factor;
+};
+
+import { calculateInjectedAmount, applyConsumptionHedgeToLogs, calculateHedgeCapacitiesAndWeights } from './consumptionHedge';
+
+export { applyConsumptionHedgeToLogs };
+export function recalibrateLogsForMiningId(
+  miningId: string, 
+  allLogs: ValueCreationLog[], 
+  resources: MiningResource[],
+  managedUsers: User[]
+): ValueCreationLog[] {
+  return applyConsumptionHedgeToLogs(miningId, allLogs, allLogs, resources, managedUsers);
+}
+
+
+export const getPurityInfo = (revenue: number, value: number, pendingValue: number, valueLimit: number) => {
+  if (revenue === 0 && (pendingValue + value) > 0) {
+    return { label: '重点监控', color: 'text-rose-600', color500: 'text-rose-500', bg: 'bg-rose-100', icon: '🔴', isRed: true };
+  }
+  if (revenue > 0 && value === valueLimit && value > 0 && (revenue / value) > 0 && (revenue / value) < 1) {
+    return { label: '尾款清收', color: 'text-orange-600', color500: 'text-orange-500', bg: 'bg-orange-100', icon: '🟡', isRed: false };
+  }
+  if (revenue > 0 && (value + pendingValue) === 0) {
+    return { label: '优质预付', color: 'text-emerald-600', color500: 'text-emerald-500', bg: 'bg-emerald-100', icon: '🟢', isRed: false };
+  }
+  if (value === 0 && revenue === 0 && pendingValue === 0) {
+    return { label: '无产值', color: 'text-slate-400', color500: 'text-slate-400', bg: 'bg-slate-100', icon: '⚪', isRed: false };
+  }
+  return { label: '平稳运营', color: 'text-blue-600', color500: 'text-blue-500', bg: 'bg-blue-100', icon: '🔵', isRed: false };
+};
+
+export const calculateConsumptionMirrorFields = (log: ValueCreationLog, resources: MiningResource[], allLogs: ValueCreationLog[]) => {
+  if (!log) {
+    return {
+      cWeightValue: '1.0000',
+      b2WeightValue: '-',
+      revLimitStr: '-',
+      valLimitCStr: '-',
+      valLimitB2Str: '-'
+    };
+  }
+
+  const res = (resources || []).find(r => r && r.id === log.miningId);
+  if (!res) {
+    return {
+      cWeightValue: '1.0000',
+      b2WeightValue: '-',
+      revLimitStr: '-',
+      valLimitCStr: '-',
+      valLimitB2Str: '-'
+    };
+  }
+  
+  const hedgeInfo = calculateHedgeCapacitiesAndWeights(res, allLogs || []);
+  const cw = hedgeInfo.cWeightRev;
+  const bw = hedgeInfo.b2Weight;
+
+  const cWeightValue = cw < 1 ? cw.toFixed(4) : '1.0000';
+  const b2WeightValue = (log.category === RefineCategory.Revenue || (log.category as string) === 'Revenue' || (log.category as string) === '收款') ? '-' : (bw < 1 ? bw.toFixed(4) : '1.0000');
+
+  const revLimitStr = `${Math.round(hedgeInfo.revInitial).toLocaleString()} / ${Math.round(hedgeInfo.revCurrent).toLocaleString()}`;
+  const valLimitCStr = `${Math.round(hedgeInfo.valInitial).toLocaleString()} / ${Math.round(hedgeInfo.valCurrent).toLocaleString()}`;
+  const valLimitB2Str = `${Math.round(hedgeInfo.valInitial).toLocaleString()} / ${Math.round(hedgeInfo.valCurrent).toLocaleString()}`;
+
+  return {
+    cWeightValue,
+    b2WeightValue,
+    revLimitStr,
+    valLimitCStr,
+    valLimitB2Str
+  };
+};
+
+export enum PermissionCluster {
+  Collection = 'Collection',
+  Value = 'Value',
+  Management = 'Management',
+  System = 'System'
+}
+
+export const RANK_CONFIG: Record<string, { cluster: PermissionCluster; salaryType: string; defaultPermissions: string[] }> = {
+  '初款专': { 
+    cluster: PermissionCluster.Collection, 
+    salaryType: '收款工资包',
+    defaultPermissions: ['kanban', 'consumption', 'creation', 'transactions', 'distribution', 'evaluation', 'account']
+  },
+  '中款专': { 
+    cluster: PermissionCluster.Collection, 
+    salaryType: '收款工资包',
+    defaultPermissions: ['kanban', 'consumption', 'creation', 'transactions', 'distribution', 'evaluation', 'account']
+  },
+  '高款专': { 
+    cluster: PermissionCluster.Collection, 
+    salaryType: '收款工资包',
+    defaultPermissions: ['kanban', 'consumption', 'creation', 'transactions', 'distribution', 'evaluation', 'account']
+  },
+  '初产专': { 
+    cluster: PermissionCluster.Value, 
+    salaryType: '产值工资包',
+    defaultPermissions: ['kanban', 'consumption', 'creation', 'transactions', 'distribution', 'evaluation', 'account']
+  },
+  '中产专': { 
+    cluster: PermissionCluster.Value, 
+    salaryType: '产值工资包',
+    defaultPermissions: ['kanban', 'consumption', 'creation', 'transactions', 'distribution', 'evaluation', 'account']
+  },
+  '高产专': { 
+    cluster: PermissionCluster.Value, 
+    salaryType: '产值工资包',
+    defaultPermissions: ['kanban', 'consumption', 'creation', 'transactions', 'distribution', 'evaluation', 'account']
+  },
+  '经管员高款专': { 
+    cluster: PermissionCluster.Collection, 
+    salaryType: '经管员工资包',
+    defaultPermissions: ['kanban', 'consumption', 'creation', 'transactions', 'distribution', 'evaluation', 'account']
+  },
+  '经管员高产专': { 
+    cluster: PermissionCluster.Value, 
+    salaryType: '经管员工资包',
+    defaultPermissions: ['kanban', 'consumption', 'creation', 'transactions', 'distribution', 'evaluation', 'account']
+  },
+  'NPC': { 
+    cluster: PermissionCluster.Management, 
+    salaryType: 'NPC工资包',
+    defaultPermissions: ['kanban', 'resources', 'audit', 'personnel', 'evaluation', 'distribution', 'reservoir', 'account']
+  },
+  '系统管理员': { 
+    cluster: PermissionCluster.System, 
+    salaryType: 'NPC工资包',
+    defaultPermissions: ['kanban', 'resources', 'audit', 'transactions', 'personnel', 'distribution', 'evaluation', 'consumption', 'creation', 'account']
+  },
+  'VP': { 
+    cluster: PermissionCluster.Management, 
+    salaryType: 'VP工资包',
+    defaultPermissions: ['kanban', 'resources', 'audit', 'transactions', 'personnel', 'distribution', 'evaluation', 'consumption', 'creation', 'reservoir', 'account']
+  },
+  '经管员NPC': { 
+    cluster: PermissionCluster.Management, 
+    salaryType: 'NPC工资包',
+    defaultPermissions: ['kanban', 'resources', 'audit', 'transactions', 'personnel', 'distribution', 'evaluation', 'reservoir', 'account']
+  }
+};
+
+export const checkUserPermission = (user: User, menuId: string): boolean => {
+  if (!user) return false;
+
+  // 1. 系统管理员默认全开菜单
+  const isAdmin = isSystemAdmin(user);
+  if (isAdmin) return true;
+
+  // 2. 仅当 permissions 数组存在且长度 > 0 时，才视为手动自定义配置
+  // 空 permissions 数组（[]）视为未自定义，按职级/角色默认权限，禁止把 [] 当成「一项都不开」
+  if (user.permissions && Array.isArray(user.permissions) && user.permissions.length > 0) {
+    return user.permissions.includes(menuId);
+  }
+
+  // 3. 未自定义 permissions 时（包括 [] 或 undefined），回退至系统角色与职级默认权限规则
+  const isNpcxie = user.role === Role.npcxie || user.category === 'NPC';
+  if (isNpcxie && (menuId === 'personnel' || menuId === 'transactions')) return false;
+
+  const rank = user.category;
+  if (rank && RANK_CONFIG[rank]) {
+    return RANK_CONFIG[rank].defaultPermissions.includes(menuId);
+  }
+
+  if (menuId === 'kanban' || menuId === 'instructions') return true;
+
+  return false;
+};
+
+/**
+ * @businessRule 根据历史履历获取指定月份的刚性工资包
+ * @description 优先匹配 effectiveMonth <= month 的最晚一条记录；若无记录则返回当前 salaryPackage
+ */
+export function getUserSalaryByMonth(user: User, month: string): number {
+  if (!user.salaryHistory || user.salaryHistory.length === 0) {
+    return user.salaryPackage || 0;
+  }
+  
+  // 按照生效月份降序排列
+  const sortedHistory = [...user.salaryHistory].sort((a, b) => b.effectiveMonth.localeCompare(a.effectiveMonth));
+  
+  // 查找生效月小于等于目标月的第一条记录
+  const record = sortedHistory.find(h => h.effectiveMonth <= month);
+  
+  if (record) return record.salary;
+  
+  // 如果目标月早于所有记录，返回最早的一条记录（或者 0，取决于业务理解，这里返回最早记录以保证历史追溯）
+  return sortedHistory[sortedHistory.length - 1].salary;
+}
+
+/**
+ * @businessRule 经营单元本级 - 产值专项计提 (computeValueOutput5Incentive)
+ * @口径 已确权产值；岗位仅初产专/中产专；高产专、经管员高产专不触发；amount×5%（中产专也是5%，不是6%）；不乘 C权、B2权
+ */
+export function computeValueOutput5Incentive(
+  log: ValueCreationLog | any,
+  userOrUsers?: User | User[] | { category?: string } | null
+): number {
+  if (!log) return 0;
+  const isValue = log.category === RefineCategory.Value || log.category === 'Value' || (log.category as string) === '产值';
+  if (!isValue) return 0;
+
+  const isConfirmed = 
+    log.status === AuditStatus.Confirmed || 
+    log.status === AuditStatus.Approved || 
+    (log.status as string) === '已确权' || 
+    (log.status as string) === 'Confirmed' ||
+    (log.status as string) === 'Approved' ||
+    (log.status as string) === '入库';
+  if (!isConfirmed) return 0;
+
+  let collectorCategory = '';
+  if (Array.isArray(userOrUsers)) {
+    const u = userOrUsers.find(user => user.id === log.recordedCollectorId);
+    collectorCategory = u?.category || '';
+  } else if (userOrUsers && typeof userOrUsers === 'object') {
+    collectorCategory = (userOrUsers as any).category || '';
+  }
+
+  // 岗位仅初产专/中产专；高产专、经管员高产专不触发
+  if (collectorCategory !== '初产专' && collectorCategory !== '中产专') {
+    return 0;
+  }
+
+  const baseAmount = calculateInjectedAmount(log);
+  // amount × 5%（中产专也是5%，不是6%）；不乘 C权、B2权
+  return Math.round(baseAmount * 0.05);
+}
+
+/**
+ * @businessRule 经营单元本级 - 收款专项计提 (computeCollection2Incentive)
+ * @口径 附录 G.2：已确权收款；仅「初款专」「中款专」；高款专、经管员高款专、含「经管员」不触发；amount×2%；不乘 C权、B2权
+ */
+export function computeCollection2Incentive(
+  log: ValueCreationLog | any,
+  userOrUsers?: User | User[] | { category?: string } | null
+): number {
+  if (!log) return 0;
+  const isRevenue = log.category === RefineCategory.Revenue || log.category === 'Revenue' || (log.category as string) === '收款';
+  if (!isRevenue) return 0;
+
+  const isConfirmed = 
+    log.status === AuditStatus.Confirmed || 
+    log.status === AuditStatus.Approved || 
+    (log.status as string) === '已确权' || 
+    (log.status as string) === 'Confirmed' ||
+    (log.status as string) === 'Approved' ||
+    (log.status as string) === '入库';
+  if (!isConfirmed) return 0;
+
+  let collectorCategory = '';
+  if (Array.isArray(userOrUsers)) {
+    const u = userOrUsers.find(user => user.id === log.recordedCollectorId);
+    collectorCategory = u?.category || '';
+  } else if (userOrUsers && typeof userOrUsers === 'object') {
+    collectorCategory = (userOrUsers as any).category || '';
+  }
+
+  // 岗位仅初款专/中款专；高款专、经管员高款专、含「经管员」不触发
+  if (collectorCategory !== '初款专' && collectorCategory !== '中款专') {
+    return 0;
+  }
+
+  const baseAmount = calculateInjectedAmount(log);
+  // amount × 2%；不乘 C权、B2权
+  return Math.round(baseAmount * 0.02);
+}
+
+/**
+ * @businessRule 矿山专项对账服务
+ */
+export const mineralReconcileService = {
+  computeLogIncentives(log: ValueCreationLog | any, userOrCategory?: User | string | null): { incentiveOutput5: number; incentiveCollection2: number } {
+    const user = typeof userOrCategory === 'string' ? ({ category: userOrCategory } as User) : (userOrCategory || undefined);
+    return {
+      incentiveOutput5: computeValueOutput5Incentive(log, user),
+      incentiveCollection2: computeCollection2Incentive(log, user)
+    };
+  }
+};
