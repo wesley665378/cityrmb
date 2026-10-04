@@ -241,6 +241,7 @@ export interface MiningResource {
   assignedTo: string; // 指派经营单元名称 (保留兼容)
   assignedToRevenue?: string; // 收款指派经营单元
   assignedToValue?: string; // 产值指派经营单元
+  description?: string; // 摘要/备注说明 (选填)
   category?: '100%' | '据实'; // 类别
   status: ResourceStatus;
   lifecycleStatus?: 'active' | 'archived' | 'settling' | string; // 生命周期状态

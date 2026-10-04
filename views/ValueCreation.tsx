@@ -33,8 +33,8 @@ import { isSalaryActiveForMonth } from '@/utils/employmentStatus';
 import { userCenterMatchesBusinessUnit, businessUnitLabelsEqual } from '@/utils/businessUnitName';
 import { isCenterManagerUser, sortCenterManagers } from '@/utils/centerManager';
 import { centerMatch, isGlobalReader, filterAuditLogsByCenter } from '@/utils/centerScope';
-import { labelBusinessUnit } from '@/utils/statusDisplay';
-import { formatCollectorDisplay, resolveCollector } from '@/utils/collector';
+import { labelBusinessUnit, labelLogBusinessUnitFromMine } from '@/utils/statusDisplay';
+import { formatCollectorDisplay, resolveCollector, getUserCompletenessScore } from '@/utils/collector';
 import { safeGetItem, safeSetItem, safeRemoveItem } from '@/utils/safeLocalStorage';
 import { formatConfirmationType } from '@/utils/formatters';
 import { toast } from 'sonner';
@@ -244,23 +244,34 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   const canExport = useMemo(() => canExportExcel(user, systemConfig), [user, systemConfig]);
   const miningReconciliations = useMemo(() => reconcileMiningLogs(logs, resources), [logs, resources]);
 
-  const [managedUsers, setManagedUsers] = useState<User[]>([]);
+  const [managedUsers, setManagedUsers] = useState<User[]>(() => (allManagedUsersProp && allManagedUsersProp.length > 0 ? allManagedUsersProp : (users || [])));
   // 全量人事主源（用于跨单元流水采集人解析、center 映射、包汇总、导出等）
   const allUsers = useMemo(() => {
-    const list: User[] = [
+    const candidateList: (User | undefined | null)[] = [
       ...(allManagedUsersProp || []),
       ...(managedUsers || []),
       ...(users || []),
-      ...(user ? [user] : [])
+      user
     ];
+
     const map = new Map<string, User>();
-    for (const u of list) {
-      if (u) {
-        if (u.id && !map.has(u.id)) map.set(u.id, u);
-        if (u.userId && !map.has(u.userId)) map.set(u.userId, u);
-        if (u.name && !map.has(u.name)) map.set(u.name, u);
+    for (const u of candidateList) {
+      if (!u) continue;
+      // 记录所有唯一维度 (id, userId, name) 确保匹配命中
+      const keys = [u.id, u.userId, u.name].filter(Boolean) as string[];
+      for (const k of keys) {
+        const lowerK = k.toLowerCase();
+        const existing = map.get(lowerK);
+        if (!existing) {
+          map.set(lowerK, u);
+        } else {
+          if (getUserCompletenessScore(u) > getUserCompletenessScore(existing)) {
+            map.set(lowerK, u);
+          }
+        }
       }
     }
+
     return Array.from(new Set(Array.from(map.values())));
   }, [allManagedUsersProp, managedUsers, users, user]);
   const [selectedOperatorId, setSelectedOperatorId] = useState<string>(user.id);
@@ -1888,7 +1899,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         '编号': log.id,
         '业务日期': resolveLogBusinessDate(log),
         '提交日期': formatSubmissionDate(log.timestamp),
-        '经营单元': labelBusinessUnit(collector?.center),
+        '经营单元': labelLogBusinessUnitFromMine(log, resources),
         '采集主体': formatCollectorDisplay(collector || log.recordedCollectorId, allUsers),
         '确权类型': formatConfirmationType(log),
         '输入数值': getRawInputAmount(log),
@@ -2785,7 +2796,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                 <div className="grid grid-cols-3 gap-2 text-slate-700">
                   <div>
                     <span className="text-slate-400 text-[10px] block">{TERMINOLOGY.BUSINESS_UNIT} / 采集人</span>
-                    <span className="font-bold">{labelBusinessUnit(collector?.center)} · {formatCollectorDisplay(collector || log.recordedCollectorId, allUsers)}</span>
+                    <span className="font-bold">{labelLogBusinessUnitFromMine(log, resources)} · {formatCollectorDisplay(collector || log.recordedCollectorId, allUsers)}</span>
                   </div>
                   <div className="text-right">
                     <span className="text-slate-400 text-[10px] block">
@@ -2907,7 +2918,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                     <td className="px-2 py-4 font-mono text-slate-400">{log.id}</td>
                     <td className="px-2 py-4 text-slate-500 font-bold hidden md:table-cell">{resolveLogBusinessDate(log)}</td>
                     <td className="px-2 py-4 text-slate-400 hidden md:table-cell">{formatSubmissionDate(log.timestamp)}</td>
-                    <td className="px-2 py-4 text-slate-600">{labelBusinessUnit(collector?.center)}</td>
+                    <td className="px-2 py-4 text-slate-600">{labelLogBusinessUnitFromMine(log, resources)}</td>
                     <td className="px-2 py-4">
                       <span className="font-bold text-slate-700">{formatCollectorDisplay(collector || log.recordedCollectorId, allUsers)}</span>
                     </td>

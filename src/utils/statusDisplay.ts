@@ -44,3 +44,22 @@ export function labelBusinessUnit(center?: string | null): string {
   if (!center || center.trim() === '') return '—';
   return center.trim();
 }
+
+/**
+ * 价值创造记录表经营单元取数 (SSOT: 附录 D.6.8)
+ * 经营单元：矿山分配时已确定，直接读矿山分轨指派。业务上不会空。
+ * - category=产值 → resources.find(miningId).assignedToValue || assignedTo
+ * - category=收款 → resources.find(miningId).assignedToRevenue || assignedTo
+ */
+export function labelLogBusinessUnitFromMine(
+  log: ValueCreationLog | undefined | null,
+  resources: any[] = []
+): string {
+  if (!log) return '—';
+  const resource = resources.find(r => r && r.id === log.miningId);
+  if (!resource) return '—';
+  const rawUnit = log.category === '收款'
+    ? (resource.assignedToRevenue || resource.assignedTo)
+    : (resource.assignedToValue || resource.assignedTo);
+  return rawUnit && String(rawUnit).trim() !== '' ? String(rawUnit).trim() : '—';
+}

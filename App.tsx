@@ -104,7 +104,18 @@ const App: React.FC = () => {
   
   const [jydyUnits, setJydyUnits] = useState<JydyUnit[]>([]);
 
-  const [managedUsers, setManagedUsers] = useState<User[]>(INITIAL_USERS);
+  const [managedUsers, setManagedUsers] = useState<User[]>(() => {
+    try {
+      const saved = safeGetItem('shihe_managed_users');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to parse managedUsers from localStorage', e);
+    }
+    return INITIAL_USERS;
+  });
   const [meetingSamples, setMeetingSamples] = useState<MeetingSample[]>([]);
   const [systemConfig, setSystemConfig] = useState<SystemConfig>({ exportEnabled: true });
   const [workspaceLoaded, setWorkspaceLoaded] = useState(false);

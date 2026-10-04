@@ -67,6 +67,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
   const [valueCapacity, setValueCapacity] = useState<number>(1000);
   const [assigneeRevenue, setAssigneeRevenue] = useState('');
   const [assigneeValue, setAssigneeValue] = useState('');
+  const [description, setDescription] = useState<string>('');
   const [customRevenueFactor, setCustomRevenueFactor] = useState<number | undefined>(undefined);
   const [customValueFactor, setCustomValueFactor] = useState<number | undefined>(undefined);
   const [category, setCategory] = useState<'100%' | '据实'>('100%');
@@ -108,7 +109,8 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
       '产初': 100000,
       '收款指派': units[0] || '默认单元',
       '产值指派': units[0] || '默认单元',
-      '核算类别': '100%'
+      '核算类别': '100%',
+      '摘要': '示例矿山说明(选填)'
     }];
     const worksheet = XLSX.utils.json_to_sheet(templateData);
     const workbook = XLSX.utils.book_new();
@@ -127,6 +129,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
       '收款指派': row.raw['收款指派'] || row.raw['执行单元'] || '',
       '产值指派': row.raw['产值指派'] || row.raw['执行单元'] || '',
       '核算类别': row.raw['核算类别'] || '',
+      '摘要': row.raw['摘要'] || row.raw['备注'] || '',
       '失败原因': row.reason
     }));
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
@@ -279,6 +282,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
         const revCap = importNetAmount(rawRevCap, RefineCategory.Revenue);
         const valCap = importNetAmount(rawValCap, RefineCategory.Value);
         const cat = row['核算类别'] || '100%';
+        const desc = row['摘要'] || row['备注'] || row['说明'] || undefined;
 
         const newRes: MiningResource = {
           id,
@@ -294,6 +298,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
           assignedTo: assRev,
           assignedToRevenue: assRev,
           assignedToValue: assVal,
+          description: desc ? String(desc).trim() : undefined,
           incentiveOutput5: 0,
           incentiveCollection2: 0,
           category: cat as '100%' | '据实',
@@ -443,6 +448,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
     setValueCapacity(roundMoney(initialVal));
     setAssigneeRevenue(res.assignedToRevenue || res.assignedTo || '');
     setAssigneeValue(res.assignedToValue || res.assignedTo || '');
+    setDescription(res.description || '');
     setCustomRevenueFactor(res.customRevenueFactor);
     setCustomValueFactor(res.customValueFactor);
     setRefineTypeFactors(res.refineTypeFactors || {});
@@ -458,6 +464,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
     setValueCapacity(1000);
     setAssigneeRevenue('');
     setAssigneeValue('');
+    setDescription('');
     setCustomRevenueFactor(undefined);
     setCustomValueFactor(undefined);
     setRefineTypeFactors({});
@@ -577,6 +584,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
       assignedTo: assigneeRevenue, // 保留兼容
       assignedToRevenue: assigneeRevenue,
       assignedToValue: assigneeValue,
+      description: description.trim() || undefined,
       incentiveOutput5: existingResource ? (existingResource.incentiveOutput5 || 0) : 0,
       incentiveCollection2: existingResource ? (existingResource.incentiveCollection2 || 1) : 0,
       category: category,
@@ -606,8 +614,9 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
       : [...resources, resourceData];
 
     const actionText = editingId ? '保存矿山指令' : '下达矿山指令';
+    const summaryConfirmText = description.trim() ? `\n【摘要】${description.trim()}` : '';
     showConfirm(
-      `确定${actionText}？\n\n【矿山编号】${newMiningId}\n【提炼类型】${selectedType}\n【收款指派】${assigneeRevenue}\n【产值指派】${assigneeValue}\n【款初】${formatMoney(purifiedRevenueCapacity)}\n【产初】${formatMoney(purifiedValueCapacity)}`,
+      `确定${actionText}？\n\n【矿山编号】${newMiningId}\n【提炼类型】${selectedType}\n【收款指派】${assigneeRevenue}\n【产值指派】${assigneeValue}\n【款初】${formatMoney(purifiedRevenueCapacity)}\n【产初】${formatMoney(purifiedValueCapacity)}${summaryConfirmText}`,
       async () => {
         setIsSaving(true);
         try {
@@ -640,6 +649,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
       '已采产值': res.minedValue,
       '收款指派': res.assignedToRevenue || res.assignedTo,
       '产值指派': res.assignedToValue || res.assignedTo,
+      '摘要': res.description || '—',
       '核算类别': res.category || '100%',
       '矿山状态': formatProjectStatusLabel(deriveProjectStatus(res).status)
     }));
@@ -947,113 +957,137 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
         </div>
         
         <form onSubmit={handleAdd} className="space-y-6 md:space-y-8 relative z-10">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-4 items-start">
-            <div className="space-y-2 col-span-1 sm:col-span-2 lg:col-span-4 min-w-0">
-              <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider h-5 flex items-center">矿山编号 (唯一定量)</label>
-              <div className="flex gap-2 w-full">
+          {/* 表单字段横向单行排布 (不换行，支持窄屏横向滚动) */}
+          <div className="overflow-x-auto pb-2 custom-scrollbar">
+            <div className="flex flex-row flex-nowrap items-start gap-3 w-full min-w-[1020px]">
+              {/* 矿山编号 (唯一定量) */}
+              <div className="space-y-2 flex-[3.2] min-w-[320px] shrink-0">
+                <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider h-5 flex items-center">矿山编号 (唯一定量)</label>
+                <div className="flex gap-2 w-full">
+                  <input
+                    type="text"
+                    value={newMiningId}
+                    onChange={(e) => setNewMiningId(e.target.value)}
+                    disabled={!!editingId}
+                    className="flex-1 min-w-0 w-full bg-white border border-slate-200 rounded-md px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 font-bold text-slate-800 transition-all placeholder:text-[#94a3b8] disabled:opacity-50 text-[13px] h-10"
+                    placeholder="自动匹配矿山编号"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={handleDownloadTemplate}
+                    className="px-2.5 bg-slate-50 text-slate-600 border border-slate-200 rounded-md text-[11px] font-black hover:bg-slate-100 transition-all flex items-center shadow-xs whitespace-nowrap h-10 shrink-0 cursor-pointer"
+                    title="下载导入模板"
+                  >
+                    📄 模板
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => document.getElementById('excel-import-input')?.click()}
+                    disabled={importLoading || isPersistingImport || isImportConfirmPending || isImportResultModalOpen}
+                    className="px-2.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-md text-[11px] font-black hover:bg-blue-100 transition-all flex items-center shadow-xs whitespace-nowrap h-10 shrink-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="批量导入矿山资源"
+                  >
+                    {importLoading ? '解析中...' : isPersistingImport ? '落库中...' : '📥 导入'}
+                  </button>
+                  <input
+                    id="excel-import-input"
+                    type="file"
+                    accept=".xlsx, .xls"
+                    className="hidden"
+                    disabled={importLoading || isPersistingImport || isImportConfirmPending || isImportResultModalOpen}
+                    onChange={handleResourceImport}
+                  />
+                  <select
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value as '100%' | '据实')}
+                    className="w-18 shrink-0 bg-white border border-slate-200 rounded-md px-1.5 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 font-bold text-slate-800 transition-all cursor-pointer text-[13px] h-10"
+                    required
+                  >
+                    <option value="100%">100%</option>
+                    <option value="据实">据实</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* 款初 */}
+              <div className="space-y-2 flex-[1] min-w-[90px]">
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider h-5 flex items-center">
+                  款初
+                </label>
                 <input
-                  type="text"
-                  value={newMiningId}
-                  onChange={(e) => setNewMiningId(e.target.value)}
-                  disabled={!!editingId}
-                  className="flex-1 min-w-0 w-full bg-white border border-slate-200 rounded-md px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 font-bold text-slate-800 transition-all placeholder:text-[#94a3b8] disabled:opacity-50 text-[13px] h-10"
-                  placeholder="自动匹配矿山编号"
+                  type="number"
+                  value={revenueCapacity}
+                  onChange={(e) => setRevenueCapacity(Number(e.target.value))}
+                  className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 font-bold text-slate-900 font-mono transition-all text-[13px] h-10"
+                  min="0"
                   required
                 />
-                <button
-                  type="button"
-                  onClick={handleDownloadTemplate}
-                  className="px-3 bg-slate-50 text-slate-600 border border-slate-200 rounded-md text-[11px] font-black hover:bg-slate-100 transition-all flex items-center shadow-xs whitespace-nowrap h-10 shrink-0 cursor-pointer ml-2"
-                  title="下载导入模板"
-                >
-                  📄 模板
-                </button>
-                <button
-                  type="button"
-                  onClick={() => document.getElementById('excel-import-input')?.click()}
-                  disabled={importLoading || isPersistingImport || isImportConfirmPending || isImportResultModalOpen}
-                  className="px-3 bg-blue-50 text-blue-600 border border-blue-200 rounded-md text-[11px] font-black hover:bg-blue-100 transition-all flex items-center shadow-xs whitespace-nowrap h-10 shrink-0 cursor-pointer ml-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="批量导入矿山资源"
-                >
-                  {importLoading ? '解析中...' : isPersistingImport ? '落库中...' : '📥 导入'}
-                </button>
+              </div>
+
+              {/* 产初 */}
+              <div className="space-y-2 flex-[1] min-w-[90px]">
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider h-5 flex items-center">
+                  产初
+                </label>
                 <input
-                  id="excel-import-input"
-                  type="file"
-                  accept=".xlsx, .xls"
-                  className="hidden"
-                  disabled={importLoading || isPersistingImport || isImportConfirmPending || isImportResultModalOpen}
-                  onChange={handleResourceImport}
+                  type="number"
+                  value={valueCapacity}
+                  onChange={(e) => setValueCapacity(Number(e.target.value))}
+                  className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 font-bold text-slate-900 font-mono transition-all text-[13px] h-10"
+                  min="0"
+                  required
                 />
+              </div>
+
+              {/* 收款指派 */}
+              <div className="space-y-2 flex-[1.2] min-w-[110px]">
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider h-5 flex items-center">收款指派</label>
                 <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value as '100%' | '据实')}
-                  className="w-20 shrink-0 bg-white border border-slate-200 rounded-md px-2 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 font-bold text-slate-800 transition-all cursor-pointer text-[13px] h-10"
+                  value={assigneeRevenue}
+                  onChange={(e) => setAssigneeRevenue(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-md px-2.5 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 font-bold text-slate-800 transition-all cursor-pointer text-[13px] h-10"
                   required
                 >
-                  <option value="100%">100%</option>
-                  <option value="据实">据实</option>
+                  <option value="">选择...</option>
+                  {units.map(center => (
+                    <option key={center} value={center}>{center}</option>
+                  ))}
                 </select>
               </div>
-            </div>
 
-            <div className="space-y-2 col-span-1 sm:col-span-1 lg:col-span-2 min-w-0">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center">
-                 款初
-              </label>
-              <input
-                type="number"
-                value={revenueCapacity}
-                onChange={(e) => setRevenueCapacity(Number(e.target.value))}
-                className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 font-bold text-slate-900 font-mono transition-all text-[13px] h-10"
-                min="0"
-                required
-              />
-            </div>
+              {/* 产值指派 */}
+              <div className="space-y-2 flex-[1.2] min-w-[110px]">
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider h-5 flex items-center">产值指派</label>
+                <select
+                  value={assigneeValue}
+                  onChange={(e) => setAssigneeValue(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-md px-2.5 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 font-bold text-slate-800 transition-all cursor-pointer text-[13px] h-10"
+                  required
+                >
+                  <option value="">选择...</option>
+                  {units.map(center => (
+                    <option key={center} value={center}>{center}</option>
+                  ))}
+                </select>
+              </div>
 
-            <div className="space-y-2 col-span-1 sm:col-span-1 lg:col-span-2 min-w-0">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center">
-                 产初
-              </label>
-              <input
-                type="number"
-                value={valueCapacity}
-                onChange={(e) => setValueCapacity(Number(e.target.value))}
-                className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 font-bold text-slate-900 font-mono transition-all text-[13px] h-10"
-                min="0"
-                required
-              />
+              {/* 摘要 (选填，产值指派右侧) */}
+              <div className="space-y-2 flex-[1.8] min-w-[150px]">
+                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider h-5 flex items-center justify-between">
+                  <span>摘要</span>
+                  <span className="text-[9px] text-blue-600 font-bold bg-blue-50 border border-blue-200/60 px-1 py-0.5 rounded">选填</span>
+                </label>
+                <input
+                  type="text"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 font-bold text-slate-800 transition-all placeholder:text-[#94a3b8] text-[13px] h-10"
+                  placeholder="矿山备注/摘要说明"
+                />
+              </div>
             </div>
-
-            <div className="space-y-2 col-span-1 sm:col-span-1 lg:col-span-2 min-w-0">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center">收款指派</label>
-              <select
-                value={assigneeRevenue}
-                onChange={(e) => setAssigneeRevenue(e.target.value)}
-                className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 font-bold text-slate-800 transition-all cursor-pointer text-[13px] h-10"
-                required
-              >
-                <option value="">选择...</option>
-                {units.map(center => (
-                  <option key={center} value={center}>{center}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-2 col-span-1 sm:col-span-1 lg:col-span-2 min-w-0">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider h-4 flex items-center">产值指派</label>
-              <select
-                value={assigneeValue}
-                onChange={(e) => setAssigneeValue(e.target.value)}
-                className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 font-bold text-slate-800 transition-all cursor-pointer text-[13px] h-10"
-                required
-              >
-                <option value="">选择...</option>
-                {units.map(center => (
-                  <option key={center} value={center}>{center}</option>
-                ))}
-              </select>
-            </div>
+          </div>
 
             {(() => {
               const currentRevenueFactor = selectedType ? refineTypeFactors[selectedType]?.customRevenueFactor : undefined;
@@ -1217,7 +1251,6 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                 />
               </div>
             )}
-          </div>
 
           <div className="space-y-3">
             <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">提炼类型 (单选) & 节奏控制</label>
@@ -1439,6 +1472,12 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                       <p className="text-[9px] font-black text-emerald-500 uppercase tracking-widest">产值指派</p>
                       <p className="text-xs font-bold text-slate-700">{res.assignedToValue || res.assignedTo}</p>
                     </div>
+                    {res.description && (
+                      <div className="col-span-2 pt-2 border-t border-slate-100">
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">摘要</p>
+                        <p className="text-xs text-slate-600 font-medium truncate" title={res.description}>{res.description}</p>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -1513,6 +1552,11 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                         <div className="text-[11px] space-y-0.5">
                           <div><span className="text-amber-600 font-black">收:</span> {res.assignedToRevenue || res.assignedTo}</div>
                           <div><span className="text-emerald-600 font-black">产:</span> {res.assignedToValue || res.assignedTo}</div>
+                          {res.description && (
+                            <div className="text-[10px] text-slate-400 truncate max-w-[140px]" title={res.description}>
+                              <span className="font-bold text-slate-500">注:</span> {res.description}
+                            </div>
+                          )}
                         </div>
                       </td>
                       <td className="p-4 text-right">

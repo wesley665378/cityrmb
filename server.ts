@@ -106,7 +106,13 @@ async function getPool() {
 let MOCK_USERS_DB: any[] = [
   { id: 'admin', userId: 'admin', name: '系统管理员', role: 'admin', category: '系统管理员', salaryPackageType: 'NPC工资包', userStatus: 'active' },
   { id: '1635', userId: '1635', name: '平台管理员', role: 'admin', category: '系统管理员', salaryPackageType: 'NPC工资包', userStatus: 'active' },
-  { id: 'npcxie', userId: 'npcxie', name: 'npcxie', role: 'npcxie', category: 'NPC', salaryPackageType: 'NPC工资包', userStatus: 'active' }
+  { id: 'npcxie', userId: 'npcxie', name: 'npcxie', role: 'npcxie', category: 'NPC', salaryPackageType: 'NPC工资包', userStatus: 'active' },
+  { id: 'SH58', userId: 'SH58', name: '王成', role: 'collector', category: '中产专', center: 'LH', userStatus: 'active' },
+  { id: 'SH67', userId: 'SH67', name: '唐恒', role: 'collector', category: '中产专', center: 'LH', userStatus: 'active' },
+  { id: 'SH68', userId: 'SH68', name: '张立', role: 'collector', category: '高产专', center: 'LH', userStatus: 'active' },
+  { id: 'szj', userId: 'szj', name: '石景山负责人', role: 'rank', center: '石景山', category: '经营单元负责人', userStatus: 'active' },
+  { id: 'LH', userId: 'LH', name: 'LH负责人', role: 'rank', center: 'LH', category: '经营单元负责人', userStatus: 'active' },
+  { id: 'QH', userId: 'QH', name: 'QH负责人', role: 'rank', center: 'QH', category: '经营单元负责人', userStatus: 'active' }
 ];
 
 const MOCK_PASSWORDS: Record<string, string> = {
@@ -319,8 +325,34 @@ async function startServer() {
             deleted: Boolean(l.deleted)
           })) : [];
 
+          const userMap = new Map<string, any>();
+          (users || []).forEach((u: any) => {
+            if (u) {
+              if (u.id) userMap.set(String(u.id).toLowerCase(), u);
+              if (u.userId) userMap.set(String(u.userId).toLowerCase(), u);
+            }
+          });
+
+          // 确保流水涉及的采集人都能在 managedUsers 中下发给前端进行名称解析
+          for (const l of parsedLogs) {
+            if (l && l.recordedCollectorId) {
+              const cid = String(l.recordedCollectorId).toLowerCase();
+              if (cid && cid !== 'sys_b2' && cid !== 'sys_c' && !userMap.has(cid)) {
+                const mockMatch = MOCK_USERS_DB.find((u: any) => 
+                  String(u.id || '').toLowerCase() === cid || 
+                  String(u.userId || '').toLowerCase() === cid ||
+                  String(u.name || '').toLowerCase() === cid
+                );
+                if (mockMatch) {
+                  userMap.set(cid, mockMatch);
+                }
+              }
+            }
+          }
+          const finalUsers = Array.from(new Set(Array.from(userMap.values())));
+
           return res.json({ 
-            managedUsers: users, 
+            managedUsers: finalUsers.length > 0 ? finalUsers : (users || []), 
             logs: parsedLogs, 
             transactions, 
             miningResources: miningResources || [],
