@@ -277,6 +277,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   const [selectedOperatorId, setSelectedOperatorId] = useState<string>(user.id);
   const [selectedCollectors, setSelectedCollectors] = useState<{ id: string, amount: number, rawAmount?: number }[]>([]);
   const [selectedMiningId, setSelectedMiningId] = useState('');
+  const [isMiningDropdownOpen, setIsMiningDropdownOpen] = useState(false);
   const [miningSearchTerm, setMiningSearchTerm] = useState('');
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
   const { isLocked } = useDedupe(500);
@@ -305,6 +306,21 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   useEffect(() => {
     setSelectedOperatorId(user.id);
   }, [user.id]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.mining-dropdown-container')) {
+        setIsMiningDropdownOpen(false);
+      }
+    };
+    if (isMiningDropdownOpen) {
+      window.addEventListener('click', handleClickOutside);
+    }
+    return () => {
+      window.removeEventListener('click', handleClickOutside);
+    };
+  }, [isMiningDropdownOpen]);
 
   useEffect(() => {
     const resource = resources.find(r => r.id === selectedMiningId);
@@ -2085,31 +2101,96 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
                 矿山编号 <span className="text-rose-500 ml-1 font-bold">*</span>
               </label>
-              <div className="flex flex-col space-y-2 relative">
-                <select 
-                  value={selectedMiningId} 
-                  onChange={(e) => {
-                    setSelectedMiningId(e.target.value);
-                    setMiningSearchTerm('');
-                  }} 
-                  className={`w-full min-w-48 bg-white border ${availableResources.length === 0 ? 'border-rose-300' : 'border-slate-200'} rounded-md px-3 py-2 text-[13px] outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all font-bold text-slate-800 h-10 cursor-pointer`}
-                  required
+              <div className="flex flex-col space-y-2 relative mining-dropdown-container">
+                <input type="text" name="selectedMiningId" value={selectedMiningId} required onChange={() => {}} className="sr-only" tabIndex={-1} />
+                <button
+                  type="button"
+                  onClick={() => setIsMiningDropdownOpen(prev => !prev)}
+                  className={`w-full bg-white border ${availableResources.length === 0 ? 'border-rose-300' : 'border-slate-200'} rounded-md px-3 py-2 text-[13px] outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all font-bold text-slate-800 h-10 cursor-pointer flex items-center justify-between text-left`}
                 >
-                  <option value="">{availableResources.length === 0 ? '暂无可用矿山' : '请选择矿山编号...'}</option>
-                  {availableResources.map(r => {
-                    const { status } = deriveProjectStatus(r);
-                    const uq = aggregateMiningQuadrantsFromLogs(logs, resources, r.id, user.center, managedUsers);
-                    const unitRemaining = selectedCategory === RefineCategory.Value ? uq.value.unconfirmed : uq.revenue.unconfirmed;
-                    const typeTag = selectedCategory === RefineCategory.Value ? '产值' : '收款';
-                    const isFull = selectedCategory === RefineCategory.Value && unitRemaining <= 0 && status === ProjectStatus.InProgress;
+                  <div className="flex items-center text-left truncate space-x-1.5">
+                    {selectedMiningId && selectedResource ? (() => {
+                      const st = deriveProjectStatus(selectedResource).status;
+                      const tt = selectedCategory === RefineCategory.Value ? '产值' : '收款';
+                      const rem = (selectedResource.description || (selectedResource as any).remark || (selectedResource as any).remarks || '').trim();
+                      return (
+                        <>
+                          <span className="font-bold shrink-0">{selectedResource.id}</span>
+                          <span className="text-slate-400">|</span>
+                          <span className="shrink-0">{tt}</span>
+                          <span className="text-slate-400">|</span>
+                          <span className="shrink-0">{st}</span>
+                          <span className="text-slate-400">|</span>
+                          {rem ? (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-semibold bg-blue-50 text-blue-600 border border-blue-200/60 truncate">
+                              {rem}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </>
+                      );
+                    })() : (
+                      <span className="text-slate-400 font-normal">
+                        {availableResources.length === 0 ? '暂无可用矿山' : '请选择矿山编号...'}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-slate-400 text-xs">▼</span>
+                </button>
 
-                    return (
-                      <option key={r.id} value={r.id} disabled={isFull}>
-                        {r.id} | {typeTag} | {status}{isFull ? ' [已满]' : ''}
-                      </option>
-                    );
-                  })}
-                </select>
+                {isMiningDropdownOpen && (
+                  <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-white border border-slate-200 rounded-md shadow-xl max-h-60 overflow-y-auto divide-y divide-slate-100">
+                    {availableResources.length === 0 ? (
+                      <div className="px-3 py-3 text-xs text-slate-400 text-center">暂无可用矿山</div>
+                    ) : (
+                      availableResources.map(r => {
+                        const { status } = deriveProjectStatus(r);
+                        const uq = aggregateMiningQuadrantsFromLogs(logs, resources, r.id, user.center, managedUsers);
+                        const unitRemaining = selectedCategory === RefineCategory.Value ? uq.value.unconfirmed : uq.revenue.unconfirmed;
+                        const typeTag = selectedCategory === RefineCategory.Value ? '产值' : '收款';
+                        const isFull = selectedCategory === RefineCategory.Value && unitRemaining <= 0 && status === ProjectStatus.InProgress;
+                        const remark = (r.description || (r as any).remark || (r as any).remarks || '').trim();
+
+                        return (
+                          <div 
+                            key={r.id}
+                            onClick={() => {
+                              if (isFull) return;
+                              setSelectedMiningId(r.id);
+                              setMiningSearchTerm('');
+                              setIsMiningDropdownOpen(false);
+                            }}
+                            className={`px-3 py-2 text-[13px] flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors ${selectedMiningId === r.id ? 'bg-blue-50/60 font-bold text-blue-900' : 'text-slate-800'} ${isFull ? 'opacity-50 cursor-not-allowed bg-slate-100' : ''}`}
+                          >
+                            <div className="flex items-center text-left truncate space-x-1.5">
+                              <span className="font-bold shrink-0">{r.id}</span>
+                              <span className="text-slate-400">|</span>
+                              <span className="shrink-0">{typeTag}</span>
+                              <span className="text-slate-400">|</span>
+                              <span className="shrink-0">{status}</span>
+                              {isFull ? (
+                                <span className="text-rose-500 text-[11px] font-bold ml-1 shrink-0">[已满]</span>
+                              ) : null}
+                              <span className="text-slate-400">|</span>
+                              {remark ? (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-semibold bg-blue-50 text-blue-600 border border-blue-200/60 truncate">
+                                  {remark}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400">—</span>
+                              )}
+                            </div>
+                            {selectedMiningId === r.id && (
+                              <span className="text-blue-600 text-xs font-bold">✓</span>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+
                 {!selectedMiningId && (
                   <p className="text-[11px] text-amber-600 font-medium bg-amber-50/50 border border-amber-200/60 rounded px-2.5 py-1 mt-1 flex items-center">
                     <span className="mr-1 text-[12px]">ℹ️</span>
@@ -2166,7 +2247,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                     onClick={() => {
                       const term = miningSearchTerm;
                       if ((term || '').trim() === '') return;
-                      const match = availableResources.find(r => 
+                      const match = availableResources.find(r =>  
                         r.id?.toLowerCase().includes((term || '').toLowerCase())
                       );
                       if (match) {

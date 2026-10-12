@@ -1,5 +1,5 @@
 import { UI_TOKENS } from '../src/constants/uiTokens';
-import React from 'react';
+import React, { useState } from 'react';
 import { Card } from '../src/components/UI';
 import { 
   BookOpen, 
@@ -11,106 +11,113 @@ import {
   Zap, 
   Scale, 
   Users,
-  Bookmark
+  Bookmark,
+  Search,
+  Plus,
+  Edit2,
+  Trash2,
+  Power,
+  PowerOff
 } from 'lucide-react';
+import { useTerms } from '../src/hooks/useTerms';
+
 
 const SystemInstructions: React.FC = () => {
-  const terms = [
-    {
-      term: '收款包',
-      desc: '指销售专家或款专在收款（Revenue）通道，通过系统确权流程审批通过后，进入个人或经营单元帐户的纯净收益部分。',
-      badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200/50'
-    },
-    {
-      term: '产兑包',
-      desc: '指技术专家或产专在产值（Value）通道，通过系统确权流程审批通过后（或通过收款背书在途自动联动），进入帐户的可承兑收益。',
-      badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200/50'
-    },
-    {
-      term: '收产包',
-      desc: '收款包与产兑包两者的合计数。用作综合考量专家个人流水的财务总盘口径。',
-      badgeColor: 'bg-sky-50 text-sky-700 border-sky-200/50'
-    },
-    {
-      term: '提报日期',
-      desc: '价值提报时的物理真实提交时间，由系统底层时间戳自动采集并锁定，不可由专家手动篡改编辑。',
-      origin: '业务日期',
-      badgeColor: 'bg-amber-50 text-amber-700 border-amber-200/50'
-    },
-    {
-      term: '经营单元流入',
-      desc: '水库管理中，各个经营项目在确权入库时按照确权比例（例如20%）统筹注入公共储备水库的流动性部分。',
-      origin: '统筹池流入 (20%)',
-      badgeColor: 'bg-blue-50 text-blue-700 border-blue-200/50'
-    },
-    {
-      term: '月度效率 / 年度效率',
-      desc: '用于反映经营单元各月、各年度投入产出的财务效益比，严禁采用任何英文缩写表达。',
-      origin: 'ROI / 投资回报率',
-      badgeColor: 'bg-rose-50 text-rose-700 border-rose-200/50'
-    }
-  ];
+  const [activeTab, setActiveTab] = useState<'instructions' | 'terms'>('instructions');
+  const [searchTerm, setSearchTerm] = useState('');
+  const { terms } = useTerms();
+
+  const filteredTerms = terms.filter(t => 
+    t.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    t.description.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   return (
-    <div className="space-y-8 max-w-6xl mx-auto pb-12 animate-fadeIn" id="system-instructions-view">
-      {/* 头部展示区 */}
-      <div className={`relative ${UI_TOKENS.RADIUS_PANEL} bg-gradient-to-br from-slate-900 to-indigo-950 p-8 md:p-12 overflow-hidden shadow-2xl border border-slate-800`}>
-        <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl -mr-20 -mt-20"></div>
-        <div className="absolute bottom-0 left-0 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl -ml-20 -mb-20"></div>
-        
-        <div className="relative z-10 space-y-4">
-          <div className="inline-flex items-center space-x-2 bg-blue-500/15 border border-blue-500/30 text-blue-400 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest">
-            <BookOpen size={14} />
-            <span>核心业务说明与规范指南</span>
+    <>
+      <div className="space-y-8 max-w-6xl mx-auto pb-12 animate-fadeIn" id="system-instructions-view">
+        {/* 头部展示区 */}
+        <div className={`relative ${UI_TOKENS.RADIUS_PANEL} bg-gradient-to-br from-slate-900 to-indigo-950 p-8 md:p-12 overflow-hidden shadow-2xl border border-slate-800`}>
+          <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl -mr-20 -mt-20"></div>
+          <div className="absolute bottom-0 left-0 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl -ml-20 -mb-20"></div>
+          
+          <div className="relative z-10 space-y-4">
+            <div className="flex space-x-4">
+              <button 
+                onClick={() => setActiveTab('instructions')}
+                className={`px-4 py-2 rounded-full text-xs font-black uppercase tracking-widest ${activeTab === 'instructions' ? 'bg-blue-500 text-white' : 'bg-slate-800 text-slate-400'}`}
+              >
+                说明正文
+              </button>
+              <button 
+                onClick={() => setActiveTab('terms')}
+                className={`px-4 py-2 rounded-full text-xs font-black uppercase tracking-widest ${activeTab === 'terms' ? 'bg-blue-500 text-white' : 'bg-slate-800 text-slate-400'}`}
+              >
+                术语表
+              </button>
+            </div>
+            <h1 className="text-3xl md:text-5xl font-black text-white tracking-tighter uppercase leading-tight">
+              城市守护者价值循环<br />{activeTab === 'instructions' ? '系统说明书' : '术语词典'}
+            </h1>
           </div>
-          <h1 className="text-3xl md:text-5xl font-black text-white tracking-tighter uppercase leading-tight">
-            城市守护者价值循环<br />系统说明书
-          </h1>
-          <p className="text-slate-400 text-sm md:text-base font-bold max-w-2xl leading-relaxed">
-            本指南阐明基于“六元价值循环模型”与“双口径对账审计”的系统运行机制。确保底层运算一致性、逻辑闭环以及各模块数据资产的分配精度。
-          </p>
         </div>
-      </div>
 
-      {/* 规范业务术语词典 */}
-      <Card className={`${UI_TOKENS.RADIUS_PANEL} bg-white border border-slate-100 shadow-xl overflow-hidden`}>
-        <div className="p-6 md:p-8 border-b border-slate-100 bg-slate-50/50">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-blue-600 text-white rounded-xl flex items-center justify-center shadow-md">
-              <Bookmark size={20} />
-            </div>
-            <div>
-              <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">
-                系统标准术语对照词典
-              </h3>
-              <p className="text-slate-500 text-xs font-bold mt-1">
-                消除装饰与行话，统一规范名称及底层对应字段
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="p-6 md:p-8">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {terms.map((item, idx) => (
-              <div key={idx} className="p-5 border border-slate-100 rounded-2xl bg-slate-50/30 space-y-3 hover:border-slate-200/80 transition-all">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <span className="font-black text-slate-900 text-base">{item.term}</span>
-                  </div>
-                  {item.origin && (
-                    <span className={`px-2.5 py-0.5 rounded text-[10px] font-black border uppercase tracking-wider ${item.badgeColor}`}>
-                      原: {item.origin}
-                    </span>
-                  )}
+        {activeTab === 'instructions' ? (
+          <Card className={`${UI_TOKENS.RADIUS_PANEL} bg-white border border-slate-100 shadow-xl p-8`}>
+             <p className="text-slate-600 text-sm leading-relaxed">
+               这里是现有的说明正文内容。本指南阐明基于“六元价值循环模型”与“双口径对账审计”的系统运行机制。确保底层运算一致性、逻辑闭环以及各模块数据资产的分配精度。
+             </p>
+          </Card>
+        ) : (
+          <Card className={`${UI_TOKENS.RADIUS_PANEL} bg-white border border-slate-100 shadow-xl overflow-hidden`}>
+            <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 bg-blue-600 text-white rounded-xl flex items-center justify-center shadow-md">
+                  <Bookmark size={20} />
                 </div>
-                <p className="text-slate-600 text-xs font-bold leading-relaxed">
-                  {item.desc}
-                </p>
+                <h3 className="text-lg font-black text-slate-900 uppercase">术语词典</h3>
               </div>
-            ))}
-          </div>
-        </div>
-      </Card>
+              <div className="flex items-center space-x-2">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                  <input 
+                    type="text" 
+                    placeholder="搜索术语..." 
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-xs font-bold"
+                  />
+                </div>
+                <button className="bg-slate-900 text-white px-3 py-2 rounded-lg text-xs font-bold flex items-center space-x-1">
+                  <Plus size={14} /> <span>新增</span>
+                </button>
+              </div>
+            </div>
+            <div className="p-6 divide-y divide-slate-100">
+              {filteredTerms.map(t => (
+                <div key={t.id} className="py-4 flex justify-between items-start">
+                  <div>
+                    <h4 className="font-black text-slate-900 text-sm">{t.name} <span className="text-[10px] text-slate-400 font-normal">({t.category})</span></h4>
+                    <p className="text-xs text-slate-600 mt-1">{t.description}</p>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <button className="p-1.5 text-slate-400 hover:text-blue-600"><Edit2 size={14} /></button>
+                    <button className="p-1.5 text-slate-400 hover:text-rose-600"><Trash2 size={14} /></button>
+                    <button className="p-1.5 text-slate-400 hover:text-slate-900">
+                      {t.deprecated ? <PowerOff size={14} /> : <Power size={14} />}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+      </div>
+    </>
+  );
+
+};
+
+
 
       {/* 核心机制与四大系统运算一致性规范 (四大金刚规则) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

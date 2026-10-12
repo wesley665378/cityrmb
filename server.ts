@@ -112,13 +112,15 @@ let MOCK_USERS_DB: any[] = [
   { id: 'SH68', userId: 'SH68', name: '张立', role: 'collector', category: '高产专', center: 'LH', userStatus: 'active' },
   { id: 'szj', userId: 'szj', name: '石景山负责人', role: 'rank', center: '石景山', category: '经营单元负责人', userStatus: 'active' },
   { id: 'LH', userId: 'LH', name: 'LH负责人', role: 'rank', center: 'LH', category: '经营单元负责人', userStatus: 'active' },
-  { id: 'QH', userId: 'QH', name: 'QH负责人', role: 'rank', center: 'QH', category: '经营单元负责人', userStatus: 'active' }
+  { id: 'QH', userId: 'QH', name: 'QH负责人', role: 'rank', center: 'QH', category: '经营单元负责人', userStatus: 'active' },
+  { id: 'lh665378', userId: 'lh665378@163.com', name: '用户', role: 'admin', category: '系统管理员', userStatus: 'active' }
 ];
 
 const MOCK_PASSWORDS: Record<string, string> = {
   'admin': '123',
   '1635': '123',
-  'npcxie': '123'
+  'npcxie': '123',
+  'lh665378@163.com': '123'
 };
 
 let MOCK_LOGS_DB: any[] = [];

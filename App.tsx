@@ -1,4 +1,5 @@
 
+import { TermsProvider } from './src/hooks/useTerms';
 import { safeSetItem, safeGetItem, safeRemoveItem } from './src/utils/safeLocalStorage';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { isAdminOrNpc, isGlobalReader, isSystemAdmin, parseCenterList } from './src/utils/accessControl';
@@ -1516,8 +1517,9 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="flex h-screen bg-slate-900 text-white overflow-hidden font-sans relative">
-      <Toaster position="top-center" richColors />
+    <TermsProvider>
+      <div className="flex h-screen bg-slate-900 text-white overflow-hidden font-sans relative">
+        <Toaster position="top-center" richColors />
       
       {/* 全局底层水印 */}
       <Watermark user={currentUser} fontSize={16} rotate={-30} opacity={0.14} />
@@ -1639,6 +1641,7 @@ const App: React.FC = () => {
       />
       <CityGuardianModal state={modalState} onClose={closeModal} />
     </div>
+  </TermsProvider>
   );
 };
 
