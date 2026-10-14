@@ -19,9 +19,10 @@ export interface MiningQuadrants {
 }
 
 import {
-  importNetAmount
+  importNetAmount,
+  mineInitialNetAmount
 } from './importQuotaCheck';
-export { importNetAmount };
+export { importNetAmount, mineInitialNetAmount };
 
 /**
  * 判断单条流水是否属于创造端正常提炼流水（非动态消耗）

@@ -64,11 +64,11 @@ export function calculateAccruedCosts(miningId: string, allLogs: ValueCreationLo
 
   const C = resourceLogs
     .filter(l => l && isDynamicCostLog(l) && l.costCategory === 'C')
-    .reduce((sum, l) => sum + (l.dynamicCost !== undefined && l.dynamicCost !== null ? Number(l.dynamicCost) : (Number(l.amount) || 0)), 0);
+    .reduce((sum, l) => sum + (l.dynamicCost !== undefined && l.dynamicCost !== null && Number(l.dynamicCost) !== 0 ? Math.abs(Number(l.dynamicCost)) : Math.abs(Number(l.amount) || 0)), 0);
 
   const B2 = resourceLogs
     .filter(l => l && isDynamicCostLog(l) && l.costCategory === 'B' && l.valueConsumptionMode === 'B2')
-    .reduce((sum, l) => sum + (l.dynamicCost !== undefined && l.dynamicCost !== null ? Number(l.dynamicCost) : (Number(l.amount) || 0)), 0);
+    .reduce((sum, l) => sum + (l.dynamicCost !== undefined && l.dynamicCost !== null && Number(l.dynamicCost) !== 0 ? Math.abs(Number(l.dynamicCost)) : Math.abs(Number(l.amount) || 0)), 0);
 
   return { C, B2 };
 }

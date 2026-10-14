@@ -67,6 +67,7 @@ import { ChevronLeft, ChevronRight, CheckCheck } from 'lucide-react';
 import { fetchWorkspaceData } from "@/api/workspace";
 import { toast } from "sonner";
 import { CityGuardianModal, useCityGuardianModal } from "@/components/CityGuardianModal";
+import { useTerms } from "@/hooks/useTerms";
 
 interface AuditingProps {
   user: User;
@@ -91,6 +92,7 @@ const Auditing: React.FC<AuditingProps> = ({
   onDeleteLog,
   systemConfig,
 }) => {
+  const { t } = useTerms();
   const canExport = useMemo(() => canExportExcel(user, systemConfig), [user, systemConfig]);
   const { isLocked } = useDedupe(500);
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
@@ -742,15 +744,15 @@ const Auditing: React.FC<AuditingProps> = ({
           <div>
             <div className="flex items-center space-x-2">
               <h3 className="text-lg md:text-xl font-black text-slate-800 tracking-tight uppercase">
-                价值确权与月度结算
+                {t('value_audit', '价值确权')}与月度结算
               </h3>
               <InfoTip 
-                title="收款确权流转规则" 
-                content="已确权收款：在价值确权中由 npcxie 手动确认后转为已确权收款。自动入库：已确权收款 = 已确权产值 = 款初 = 产初，满90天储期后自动入库。" 
+                title={`${t('revenue_audit', '收款确权')}流转规则`} 
+                content={`已确权${t('revenue', '收款')}：在${t('value_audit', '价值确权')}中由 npcxie 手动确认后转为已确权${t('revenue', '收款')}。自动${t('status_approved', '入库')}：已确权${t('revenue', '收款')} = 已确权${t('production_value', '产值')} = ${t('revenue_initial', '款初')} = ${t('value_initial', '产初')}，满90天储期后自动${t('status_approved', '入库')}。`} 
               />
             </div>
             <p className="text-[10px] font-bold text-slate-400 mt-0.5">
-              采集主体：{formatCollectorDisplay(user)} · 依据 7.1 分配律实时校验
+              {t('collector', '采集主体')}：{formatCollectorDisplay(user)} · 依据 7.1 分配律实时校验
             </p>
           </div>
         </div>
@@ -770,15 +772,15 @@ const Auditing: React.FC<AuditingProps> = ({
           <span className="text-xs font-bold uppercase tracking-wider text-slate-200">待办清单中枢</span>
         </div>
         <div className="flex items-center space-x-1.5 px-3 py-1 rounded-xl bg-slate-800 border border-slate-700/80 text-xs">
-          <span className="text-slate-400">收款待办:</span>
+          <span className="text-slate-400">{t('revenue', '收款')}待办:</span>
           <span className={`font-mono font-bold ${auditTasks.length > 0 ? 'text-blue-400' : 'text-slate-300'}`}>{auditTasks.length} 笔</span>
         </div>
         <div className="flex items-center space-x-1.5 px-3 py-1 rounded-xl bg-slate-800 border border-slate-700/80 text-xs">
-          <span className="text-slate-400">联动待办:</span>
+          <span className="text-slate-400">{t('linked_audit', '联动')}待办:</span>
           <span className={`font-mono font-bold ${linkedPendingTasks.length > 0 ? 'text-emerald-400' : 'text-slate-300'}`}>{linkedPendingTasks.length} 笔</span>
         </div>
         <div className="flex items-center space-x-1.5 px-3 py-1 rounded-xl bg-slate-800 border border-slate-700/80 text-xs">
-          <span className="text-slate-400">消耗待办:</span>
+          <span className="text-slate-400">{t('dynamic_consumption', '消耗')}待办:</span>
           <span className={`font-mono font-bold ${consumptionTasks.length > 0 ? 'text-rose-400' : 'text-slate-300'}`}>{consumptionTasks.length} 笔</span>
         </div>
         <div className="ml-auto text-xs font-mono font-bold text-slate-400">
@@ -791,10 +793,10 @@ const Auditing: React.FC<AuditingProps> = ({
         <div className="flex flex-wrap bg-slate-100 p-1.5 rounded-2xl border border-slate-200 shadow-inner gap-1">
             <button
               onClick={() => setActiveTab("pending")}
-              title="查看待处理收款确权任务"
+              title={`查看待处理${t('revenue_audit', '收款确权')}任务`}
               className={`px-4 md:px-5 py-2.5 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center space-x-2 ${activeTab === "pending" ? "bg-white text-slate-900 shadow-sm border border-slate-200/80" : "text-slate-500 hover:text-slate-800"}`}
             >
-              <span>收款确权</span>
+              <span>{t('revenue_audit', '收款确权')}</span>
               <span
                 className={`px-2 py-0.5 rounded-full text-xs font-bold ${activeTab === "pending" ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"}`}
               >
@@ -803,10 +805,10 @@ const Auditing: React.FC<AuditingProps> = ({
             </button>
             <button
               onClick={() => setActiveTab("linked")}
-              title="查看自动联动确权记录"
+              title={`查看自动${t('linked_audit', '联动确权')}记录`}
               className={`px-4 md:px-5 py-2.5 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center space-x-2 ${activeTab === "linked" ? "bg-white text-slate-900 shadow-sm border border-slate-200/80" : "text-slate-500 hover:text-slate-800"}`}
             >
-              <span>联动确权</span>
+              <span>{t('linked_audit', '联动确权')}</span>
               <span
                 className={`px-2 py-0.5 rounded-full text-xs font-bold ${activeTab === "linked" ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-600"}`}
               >
@@ -815,10 +817,10 @@ const Auditing: React.FC<AuditingProps> = ({
             </button>
             <button
               onClick={() => setActiveTab("consumption")}
-              title="查看待处理消耗确权任务"
+              title={`查看待处理${t('consumption_audit', '消耗确权')}任务`}
               className={`px-4 md:px-5 py-2.5 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center space-x-2 ${activeTab === "consumption" ? "bg-white text-slate-900 shadow-sm border border-slate-200/80" : "text-slate-500 hover:text-slate-800"}`}
             >
-              <span>消耗确权</span>
+              <span>{t('consumption_audit', '消耗确权')}</span>
               <span
                 className={`px-2 py-0.5 rounded-full text-xs font-bold ${activeTab === "consumption" ? "bg-rose-600 text-white" : "bg-slate-200 text-slate-600"}`}
               >
@@ -827,10 +829,10 @@ const Auditing: React.FC<AuditingProps> = ({
             </button>
             <button
               onClick={() => setActiveTab("confirmed")}
-              title="查看已完成确权的记录"
+              title={`查看已完成${t('status_confirmed', '确权')}的记录`}
               className={`px-4 md:px-5 py-2.5 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center space-x-2 ${activeTab === "confirmed" ? "bg-white text-slate-900 shadow-sm border border-slate-200/80" : "text-slate-500 hover:text-slate-800"}`}
             >
-              <span>确权记录</span>
+              <span>{t('audit_records', '确权记录')}</span>
               <span
                 className={`px-2 py-0.5 rounded-full text-xs font-bold ${activeTab === "confirmed" ? "bg-blue-600 text-white" : "bg-slate-200 text-slate-600"}`}
               >
@@ -851,13 +853,13 @@ const Auditing: React.FC<AuditingProps> = ({
         <Card
           title={
             activeTab === "pending"
-              ? `待处理收款确权 (${auditTasks.length})`
+              ? `待处理${t('revenue_audit', '收款确权')} (${auditTasks.length})`
               : activeTab === "consumption"
-                ? `待处理消耗确权 (${consumptionTasks.length})`
+                ? `待处理${t('consumption_audit', '消耗确权')} (${consumptionTasks.length})`
                 : activeTab === "linked"
-                  ? "联动确权记录"
+                  ? `${t('linked_audit', '联动确权')}记录`
                   : activeTab === "confirmed"
-                    ? `确权记录 (${confirmedTasks.length})`
+                    ? `${t('audit_records', '确权记录')} (${confirmedTasks.length})`
                     : "成本审计记录"
           }
           noPadding
@@ -1027,14 +1029,14 @@ const Auditing: React.FC<AuditingProps> = ({
                     <th className="px-3 py-2 text-right whitespace-nowrap min-w-[72px]">非效对冲</th>
                     <th className="px-3 py-2 text-right whitespace-nowrap min-w-[44px]">A</th>
                     <th className="px-3 py-2 text-right whitespace-nowrap min-w-[64px]">C积分</th>
-                    <th className="px-4 py-2 text-right font-bold whitespace-nowrap min-w-[60px]">C权</th>
-                    <th className="px-4 py-2 text-right font-bold whitespace-nowrap min-w-[96px]">款初/款当</th>
+                    <th className="px-4 py-2 text-right font-bold whitespace-nowrap min-w-[60px]">{t('c_weight', 'C权')}</th>
+                    <th className="px-4 py-2 text-right font-bold whitespace-nowrap min-w-[96px]">{t('revenue_initial', '款初')}/{t('revenue_hedged', '款当')}</th>
                     <th className="px-3 py-2 text-right whitespace-nowrap min-w-[44px]">B1</th>
                     <th className="px-3 py-2 text-right whitespace-nowrap min-w-[64px]">B2积分</th>
-                    <th className="px-4 py-2 text-right font-bold whitespace-nowrap min-w-[60px]">B2权</th>
-                    <th className="px-4 py-2 text-right font-bold whitespace-nowrap min-w-[96px]">产初/产当</th>
-                    <th className="px-4 py-2 text-center whitespace-nowrap min-w-[88px]">确权日期</th>
-                    <th className="px-4 py-2 text-right whitespace-nowrap min-w-[80px]">确权状态</th>
+                    <th className="px-4 py-2 text-right font-bold whitespace-nowrap min-w-[60px]">{t('b2_weight', 'B2权')}</th>
+                    <th className="px-4 py-2 text-right font-bold whitespace-nowrap min-w-[96px]">{t('value_initial', '产初')}/{t('value_hedged', '产当')}</th>
+                    <th className="px-4 py-2 text-center whitespace-nowrap min-w-[88px]">{t('status_confirmed', '确权')}日期</th>
+                    <th className="px-4 py-2 text-right whitespace-nowrap min-w-[80px]">{t('status_confirmed', '确权')}状态</th>
                     {activeTab === "consumption" && (
                       <th className="sticky top-0 right-0 z-40 bg-slate-100 border-l border-slate-200/80 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.08)] px-4 py-2 text-right whitespace-nowrap min-w-[100px]">
                         <div className="flex items-center justify-end space-x-2">
@@ -1233,20 +1235,20 @@ const Auditing: React.FC<AuditingProps> = ({
                     <th className={`px-4 py-2 whitespace-nowrap min-w-[88px] sticky top-0 z-40 bg-slate-100 border-r border-slate-200/80 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] ${activeTab === "pending" ? "left-10" : "left-0"}`}>申报编号</th>
                     <th className="px-4 py-2 whitespace-nowrap min-w-[88px]">业务日期</th>
                     <th className="px-3 md:px-4 py-2 whitespace-nowrap min-w-[80px]">{TERMINOLOGY.BUSINESS_UNIT}</th>
-                    <th className="px-3 md:px-4 py-2 whitespace-nowrap min-w-[80px]">矿山编号</th>
-                    <th className="hidden md:table-cell px-4 py-2 whitespace-nowrap min-w-[88px]">采集主体</th>
+                    <th className="px-3 md:px-4 py-2 whitespace-nowrap min-w-[80px]">{t('mining_code', '矿山编号')}</th>
+                    <th className="hidden md:table-cell px-4 py-2 whitespace-nowrap min-w-[88px]">{t('collector', '采集主体')}</th>
                     <th className="px-3 md:px-4 py-2 text-right whitespace-nowrap min-w-[84px]">
-                      {activeTab === "linked" ? "输入产值" : (activeTab === "pending" ? "输入收款" : "输入数值")}
+                      {activeTab === "linked" ? `输入${t('production_value', '产值')}` : (activeTab === "pending" ? `输入${t('revenue', '收款')}` : "输入数值")}
                     </th>
                     <th className="px-3 md:px-4 py-2 text-right whitespace-nowrap min-w-[76px]">注入积分</th>
                     {(activeTab === "linked" ||
                       activeTab === "confirmed") && (
                       <>
                         <th className="hidden xl:table-cell px-4 py-2 text-center whitespace-nowrap min-w-[76px]">
-                          确权时间
+                          {t('status_confirmed', '确权')}时间
                         </th>
                         <th className="hidden xl:table-cell px-4 py-2 text-center whitespace-nowrap min-w-[76px]">
-                          预计入库
+                          预计{t('status_approved', '入库')}
                         </th>
                       </>
                     )}

@@ -2,9 +2,21 @@ import { RefineCategory } from '../../types';
 import { formatMoney } from './formatMoney';
 
 /**
- * 单行折算函数：输入原始金额 rawAmount 与 类别/轨（收款/产值）转换为净值
+ * 矿山双轨初限折算函数（SSOT 存库口径）：
+ * 矿山下达、录入保存、批量导入时，款初与产初存库均为提纯后净值（一律 × 0.933 提纯落库）。
+ * 严禁矿山初限存库走 1:1 毛额分支！
+ */
+export function mineInitialNetAmount(rawAmount: number): number {
+  return Math.round((Number(rawAmount) || 0) * 0.933);
+}
+
+/**
+ * 创造提报 / Excel 导入注入专属折算函数（附录 AB / F.3.3 / I.7.3）：
  * - 收款 (Revenue): Math.round(rawAmount * 0.933)
  * - 产值 (Value): Math.round(rawAmount) (1:1，不乘 0.933)
+ * 
+ * 警告：此函数为「价值创造提报流水注入」口径，严禁用作矿山下达/初限存库！
+ * 矿山双轨初限存库请使用 mineInitialNetAmount。
  */
 export function importNetAmount(
   rawAmount: number,

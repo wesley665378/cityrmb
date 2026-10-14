@@ -171,10 +171,10 @@ export const calculateConsumptionMirrorFields = (log: ValueCreationLog, resource
   if (!log) {
     return {
       cWeightValue: '1.0000',
-      b2WeightValue: '-',
-      revLimitStr: '-',
-      valLimitCStr: '-',
-      valLimitB2Str: '-'
+      b2WeightValue: '—',
+      revLimitStr: '—',
+      valLimitCStr: '—',
+      valLimitB2Str: '—'
     };
   }
 
@@ -182,10 +182,10 @@ export const calculateConsumptionMirrorFields = (log: ValueCreationLog, resource
   if (!res) {
     return {
       cWeightValue: '1.0000',
-      b2WeightValue: '-',
-      revLimitStr: '-',
-      valLimitCStr: '-',
-      valLimitB2Str: '-'
+      b2WeightValue: '—',
+      revLimitStr: '—',
+      valLimitCStr: '—',
+      valLimitB2Str: '—'
     };
   }
   
@@ -193,8 +193,9 @@ export const calculateConsumptionMirrorFields = (log: ValueCreationLog, resource
   const cw = hedgeInfo.cWeightRev;
   const bw = hedgeInfo.b2Weight;
 
+  const isRevenue = (log.category === RefineCategory.Revenue || (log.category as string) === 'Revenue' || (log.category as string) === '收款');
   const cWeightValue = cw < 1 ? cw.toFixed(4) : '1.0000';
-  const b2WeightValue = (log.category === RefineCategory.Revenue || (log.category as string) === 'Revenue' || (log.category as string) === '收款') ? '-' : (bw < 1 ? bw.toFixed(4) : '1.0000');
+  const b2WeightValue = isRevenue ? '—' : (bw < 1 ? bw.toFixed(4) : '1.0000');
 
   const revLimitStr = `${Math.round(hedgeInfo.revInitial).toLocaleString()} / ${Math.round(hedgeInfo.revCurrent).toLocaleString()}`;
   const valLimitCStr = `${Math.round(hedgeInfo.valInitial).toLocaleString()} / ${Math.round(hedgeInfo.valCurrent).toLocaleString()}`;
@@ -260,27 +261,34 @@ export const RANK_CONFIG: Record<string, { cluster: PermissionCluster; salaryTyp
   'NPC': { 
     cluster: PermissionCluster.Management, 
     salaryType: 'NPC工资包',
-    defaultPermissions: ['kanban', 'resources', 'audit', 'personnel', 'evaluation', 'distribution', 'reservoir', 'account']
+    defaultPermissions: ['kanban', 'resources', 'audit', 'collectors', 'personnel', 'evaluation', 'distribution', 'reservoir', 'account']
   },
   '系统管理员': { 
     cluster: PermissionCluster.System, 
     salaryType: 'NPC工资包',
-    defaultPermissions: ['kanban', 'resources', 'audit', 'transactions', 'personnel', 'distribution', 'evaluation', 'consumption', 'creation', 'account']
+    defaultPermissions: ['kanban', 'resources', 'audit', 'transactions', 'collectors', 'personnel', 'distribution', 'evaluation', 'consumption', 'creation', 'account']
   },
   'VP': { 
     cluster: PermissionCluster.Management, 
     salaryType: 'VP工资包',
-    defaultPermissions: ['kanban', 'resources', 'audit', 'transactions', 'personnel', 'distribution', 'evaluation', 'consumption', 'creation', 'reservoir', 'account']
+    defaultPermissions: ['kanban', 'resources', 'audit', 'transactions', 'collectors', 'personnel', 'distribution', 'evaluation', 'consumption', 'creation', 'reservoir', 'account']
   },
   '经管员NPC': { 
     cluster: PermissionCluster.Management, 
     salaryType: 'NPC工资包',
-    defaultPermissions: ['kanban', 'resources', 'audit', 'transactions', 'personnel', 'distribution', 'evaluation', 'reservoir', 'account']
+    defaultPermissions: ['kanban', 'resources', 'audit', 'transactions', 'collectors', 'personnel', 'distribution', 'evaluation', 'reservoir', 'account']
   }
 };
 
 export const checkUserPermission = (user: User, menuId: string): boolean => {
   if (!user) return false;
+
+  // 0. 特判 npchr 运维账号：侧栏严格仅开「采集主体」
+  const userIdStr = String(user.id ?? '').trim().toLowerCase();
+  const loginStr = String(user.userId ?? '').trim().toLowerCase();
+  if (userIdStr === 'npchr' || loginStr === 'npchr') {
+    return menuId === 'collectors';
+  }
 
   // 1. 系统管理员默认全开菜单
   const isAdmin = isSystemAdmin(user);
@@ -294,7 +302,7 @@ export const checkUserPermission = (user: User, menuId: string): boolean => {
 
   // 3. 未自定义 permissions 时（包括 [] 或 undefined），回退至系统角色与职级默认权限规则
   const isNpcxie = user.role === Role.npcxie || user.category === 'NPC';
-  if (isNpcxie && (menuId === 'personnel' || menuId === 'transactions')) return false;
+  if (isNpcxie && (menuId === 'personnel' || menuId === 'collectors' || menuId === 'transactions')) return false;
 
   const rank = user.category;
   if (rank && RANK_CONFIG[rank]) {

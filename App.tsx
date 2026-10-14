@@ -1,5 +1,5 @@
 
-import { TermsProvider } from './src/hooks/useTerms';
+import { TermsProvider, useTerms } from './src/hooks/useTerms';
 import { safeSetItem, safeGetItem, safeRemoveItem } from './src/utils/safeLocalStorage';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { isAdminOrNpc, isGlobalReader, isSystemAdmin, parseCenterList } from './src/utils/accessControl';
@@ -12,6 +12,7 @@ import { canonicalizeBusinessUnitLabel, resolveBusinessUnitName } from './src/ut
 import Dashboard from './views/Dashboard';
 import ValueCreation from './views/ValueCreation';
 import { calculateHistoricalNetValue, checkUserPermission } from './src/utils/business';
+import { MENU_ITEMS } from './src/constants';
 import { applyConsumptionHedgeToLogs } from './src/utils/consumptionHedge';
 import { isDynamicCostLog } from './src/utils/costCategory';
 import { calculateAuditPendingCounts } from './src/utils/auditFilter';
@@ -56,12 +57,13 @@ import { useCircuitBreaker } from './src/hooks/useCircuitBreaker';
 import { buildSyncPayload, buildAppSyncPayload } from './src/app/workspaceSync';
 import { getLocalDateString, getLocalMonthString } from './src/utils/dateUtils';
 import { roundMoney } from './src/utils/formatMoney';
-import { mergeMiningResources } from './src/utils/miningCapacity';
+import { mergeMiningResources, calibrateMiningResources } from './src/utils/miningCapacity';
 
 const INITIAL_USERS: User[] = [
   { id: 'admin', userId: 'admin', name: '系统管理员', role: Role.Admin, category: '系统管理员', salaryPackageType: 'NPC工资包', userStatus: 'active' },
   { id: "1635", userId: "1635", name: "平台管理员", role: Role.Admin, category: "系统管理员", salaryPackageType: "NPC工资包", userStatus: "active" },
-  { id: 'npcxie', userId: 'npcxie', name: 'npcxie', role: Role.npcxie, category: 'NPC', salaryPackageType: 'NPC工资包', userStatus: 'active' }
+  { id: 'npcxie', userId: 'npcxie', name: 'npcxie', role: Role.npcxie, category: 'NPC', salaryPackageType: 'NPC工资包', userStatus: 'active' },
+  { id: 'npchr', userId: 'npchr', name: 'npchr', role: Role.Collector, category: 'NPC', permissions: ['collectors'], salaryPackageType: 'NPC工资包', userStatus: 'active' }
 ];
 
 const INITIAL_MINING_RESOURCES: MiningResource[] = [
@@ -89,7 +91,7 @@ const INITIAL_MINING_RESOURCES: MiningResource[] = [
   }
 ];
 
-const App: React.FC = () => {
+const AppContent: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     if (import.meta.env.VITE_USE_LOCAL_AUTH === 'true') {
       try {
@@ -208,7 +210,7 @@ const App: React.FC = () => {
             setTransactions(backfilledTxs);
           }
           if (data.miningResources && Array.isArray(data.miningResources)) {
-            const backfilledResources = data.miningResources.map((r: any) => ({
+            const backfilledResources = calibrateMiningResources(data.miningResources.map((r: any) => ({
               ...r,
               // 统一步骤：加载时即完成0.933提纯转换（注：已在入库时提纯，此处仅加载无需再次乘0.933）
               revenueCapacity: r.revenueCapacity,
@@ -221,7 +223,7 @@ const App: React.FC = () => {
               pendingRevenue: r.pendingRevenue ?? 0,
               confirmedRevenue: r.confirmedRevenue ?? 0,
               unconfirmedRevenue: r.unconfirmedRevenue ?? 0,
-            }));
+            })));
             setMiningResources(backfilledResources);
           }
           if (data.acceptanceRecords && Array.isArray(data.acceptanceRecords)) {
@@ -949,7 +951,7 @@ const App: React.FC = () => {
 
       try {
         const savedResources = safeGetItem('shihe_resources');
-        if (savedResources) setMiningResources(JSON.parse(savedResources));
+        if (savedResources) setMiningResources(calibrateMiningResources(JSON.parse(savedResources)));
       } catch (e) {
         console.warn('Failed to parse shihe_resources from localStorage', e);
       }
@@ -1064,12 +1066,13 @@ const App: React.FC = () => {
   }, [addSystemLog]);
 
   const handleSwitchUser = (user: User) => {
-    addSystemLog('切换智能体', `从 ${currentUser.name} 切换到 ${user.name}`, user);
+    addSystemLog('切换智能体', `从 ${currentUser?.name || ''} 切换到 ${user.name}`, user);
     setCurrentUser(user);
     
     const isAllowed = checkUserPermission(user, activeTab);
     if (!isAllowed) {
-      setActiveTab('kanban');
+      const firstAllowed = MENU_ITEMS.find(item => checkUserPermission(user, item.id))?.id || 'collectors';
+      setActiveTab(firstAllowed);
     }
   };
 
@@ -1162,6 +1165,13 @@ const App: React.FC = () => {
     }
   }, [workspaceLoaded, currentUser, auditPendingCounts.totalPendingCount]);
 
+  useEffect(() => {
+    if (currentUser && !checkUserPermission(currentUser, activeTab)) {
+      const firstAllowed = MENU_ITEMS.find(item => checkUserPermission(currentUser, item.id))?.id || 'collectors';
+      setActiveTab(firstAllowed);
+    }
+  }, [currentUser, activeTab]);
+
   const filteredTransactions = useMemo(() => {
     return filterTransactionsByCenter(transactions, currentUser, managedUsers);
   }, [transactions, currentUser, managedUsers]);
@@ -1199,80 +1209,88 @@ const App: React.FC = () => {
     }
   }, [addSystemLog, persistWorkspaceWithOverrides]);
 
-  const MODULE_META: Record<string, { title: string; subtitle: string; icon: string; badge?: string }> = {
+  const { t } = useTerms();
+
+  const MODULE_META: Record<string, { title: string; subtitle: string; icon: string; badge?: string }> = useMemo(() => ({
     kanban: {
-      title: '经营看板',
-      subtitle: '六元价值循环 · 全景经营驾驶舱',
+      title: t('business_dashboard', '经营看板'),
+      subtitle: `六元${t('production_value', '价值')}循环 · 全景经营驾驶舱`,
       icon: '📊',
       badge: '核心中枢'
     },
     resources: {
-      title: '矿山资源',
-      subtitle: '矿山资源库 · 资产与产能配置',
+      title: t('mining_resource', '矿山资源'),
+      subtitle: `${t('mining_resource', '矿山资源')}库 · 资产与产能配置`,
       icon: '🗺️',
       badge: '资产管理'
     },
     creation: {
-      title: '价值创造',
-      subtitle: '价值创造申报 · 价值与收益提炼',
+      title: t('value_creation', '价值创造'),
+      subtitle: `${t('value_creation', '价值创造')}申报 · ${t('production_value', '价值')}与收益提炼`,
       icon: '💎',
       badge: '源头提炼'
     },
     consumption: {
-      title: '动态消耗',
-      subtitle: '动态消耗对冲 · 刚性与损耗管理',
+      title: t('dynamic_consumption', '动态消耗'),
+      subtitle: `${t('dynamic_consumption', '动态消耗')}对冲 · 刚性与损耗管理`,
       icon: '📉',
       badge: '对冲核减'
     },
     audit: {
-      title: '价值确权',
-      subtitle: '价值确权审核 · 双轨溯源与合规',
+      title: t('value_audit', '价值确权'),
+      subtitle: `${t('value_audit', '价值确权')}审核 · 双轨溯源与合规`,
       icon: '🛡️',
       badge: '合规核验'
     },
     transactions: {
-      title: '内部交易',
-      subtitle: '内部交易流转 · 资源协同与结算',
+      title: t('internal_transaction', '内部交易'),
+      subtitle: `${t('internal_transaction', '内部交易')}流转 · 资源协同与结算`,
       icon: '🤝',
       badge: '协同结算'
     },
     evaluation: {
-      title: '价值评价',
-      subtitle: '多维价值评价 · 绩效与贡献度量',
+      title: t('value_evaluation', '价值评价'),
+      subtitle: `多维${t('value_evaluation', '价值评价')} · 绩效与贡献度量`,
       icon: '⚖️',
       badge: '绩效量化'
     },
     distribution: {
-      title: '价值分配',
-      subtitle: '价值分配结算 · 激励与分红兑现',
+      title: t('value_distribution', '价值分配'),
+      subtitle: `${t('value_distribution', '价值分配')}结算 · 激励与分红兑现`,
       icon: '💸',
       badge: '收益兑现'
     },
     reservoir: {
-      title: '水库管理',
-      subtitle: '六元水库联动 · 资金与蓄水池调控',
-      icon: '🌊',
+      title: t('admin_management', '后台管理'),
+      subtitle: `${t('admin_management', '后台管理')} · 资金与蓄水池调控`,
+      icon: '⚙️',
       badge: '资金蓄水'
     },
+    collectors: {
+      title: t('collectors_pool', '采集主体'),
+      subtitle: '采集主体矩阵 · 经营单元维护与架构',
+      icon: '📋',
+      badge: '采集主体'
+    },
     personnel: {
-      title: '人事矩阵',
-      subtitle: '人事组织矩阵 · 角色与权限架构',
+      title: t('personnel_pool', '人事矩阵'),
+      subtitle: '人事组织矩阵 · 账号管理与RBAC权限',
       icon: '👥',
       badge: '组织架构'
     },
     account: {
-      title: '我的帐户',
+      title: t('my_account', '我的帐户'),
       subtitle: '个人账户中心 · 个人资产与凭证',
       icon: '👤',
       badge: '个人资产'
     },
     instructions: {
-      title: '系统说明',
+      title: t('system_instructions', '系统说明'),
       subtitle: '系统规范指南 · 业务规则与模型说明',
       icon: '📖',
       badge: '规则指引'
     }
-  };
+  }), [t]);
 
   const mainScrollRef = useRef<HTMLElement>(null);
 
@@ -1332,6 +1350,9 @@ const App: React.FC = () => {
         managedUsers: managedUsers,
         resources: filteredResources, 
         logs: filteredLogs, 
+        jzczLogs: filteredLogs,
+        hedgeLogs: auditLogs,
+        auditLogs: auditLogs,
         onLogSubmit, 
         onSwitchTab: handleTabChange,
         transactions: filteredTransactions,
@@ -1349,7 +1370,7 @@ const App: React.FC = () => {
         resources: filteredResources, 
         logs: auditLogs, 
         jzczLogs: filteredLogs.filter(l => !isDynamicCostLog(l)),
-        dtcbLogs: auditLogs.filter(l => isDynamicCostLog(l)),
+        dtcbLogs: auditLogs.filter(l => isDynamicCostLog(l) || l.confirmationType === '消耗确权' || l.confirmationType === '手动确权'),
         onLogSubmit: onConsumptionSubmit,
         persistWorkspaceWithOverrides,
         updateLastSyncedFingerprint,
@@ -1373,7 +1394,7 @@ const App: React.FC = () => {
                 setLogs(combined);
               }
               if (data.transactions) setTransactions(data.transactions);
-              if (data.miningResources) setMiningResources(data.miningResources);
+              if (data.miningResources) setMiningResources(calibrateMiningResources(data.miningResources));
               if (data.acceptanceRecords) setAcceptanceRecords(data.acceptanceRecords);
               
               const currentUnits = jydyUnits.map(u => u.name);
@@ -1455,7 +1476,27 @@ const App: React.FC = () => {
         systemConfig
       },
       account: { currentUser, logs: auditLogs, transactions: filteredTransactions, resources: filteredResources, users: filteredUsers, systemConfig },
+      collectors: { 
+        mode: 'collectors' as const,
+        user: currentUser,
+        users: filteredUsers, 
+        onUpdateUsers,
+        onUpdatePassword,
+        onClearTestData,
+        jydyUnits: jydyUnits,
+        onUpdateJydyUnits: setJydyUnits,
+        persist: persistWorkspaceWithOverrides,
+        allLogs: auditLogs,
+        onAppendLog: (log: ValueCreationLog) => {
+          setLogs(prev => {
+            const next = [...prev, log];
+            persistWorkspaceWithOverrides({ logs: next });
+            return next;
+          });
+        }
+      },
       personnel: { 
+        mode: 'accounts' as const,
         user: currentUser,
         users: filteredUsers, 
         onUpdateUsers,
@@ -1492,6 +1533,7 @@ const App: React.FC = () => {
       evaluation: <Evaluation {...tabProps.evaluation} />,
       distribution: <Distribution {...tabProps.distribution} />,
       account: <MyAccount {...tabProps.account} />,
+      collectors: <PersonnelPool {...tabProps.collectors} />,
       personnel: <PersonnelPool {...tabProps.personnel} />,
       instructions: <SystemInstructions />
     };
@@ -1517,8 +1559,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <TermsProvider>
-      <div className="flex h-screen bg-slate-900 text-white overflow-hidden font-sans relative">
+    <div className="flex h-screen bg-slate-900 text-white overflow-hidden font-sans relative">
         <Toaster position="top-center" richColors />
       
       {/* 全局底层水印 */}
@@ -1641,7 +1682,14 @@ const App: React.FC = () => {
       />
       <CityGuardianModal state={modalState} onClose={closeModal} />
     </div>
-  </TermsProvider>
+  );
+};
+
+const App: React.FC = () => {
+  return (
+    <TermsProvider>
+      <AppContent />
+    </TermsProvider>
   );
 };
 

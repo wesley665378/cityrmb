@@ -357,7 +357,7 @@ async function startServer() {
             managedUsers: finalUsers.length > 0 ? finalUsers : (users || []), 
             logs: parsedLogs, 
             transactions, 
-            miningResources: miningResources || [],
+            miningResources: (miningResources || []).map(calibrateServerMiningResource),
             valueEfficiencySnapshots: snapshots || [],
             acceptanceRecords: cdtzRows && cdtzRows.length > 0 ? cdtzRows : MOCK_ACCEPTANCE_DB,
             circuitBreakers: rdqRows && rdqRows.length > 0 ? rdqRows : MOCK_RDQ_DB,
@@ -378,14 +378,40 @@ async function startServer() {
           // Don't throw, just fall through to mock
         }
       }
-      res.json({ managedUsers: MOCK_USERS_DB, logs: MOCK_LOGS_DB, transactions: MOCK_TRANSACTIONS_DB, miningResources: MOCK_RESOURCES_DB, valueEfficiencySnapshots: MOCK_SNAPSHOTS_DB, acceptanceRecords: MOCK_ACCEPTANCE_DB, circuitBreakers: MOCK_RDQ_DB, rdq: MOCK_RDQ_DB, meetingSamples: MOCK_MEETING_SAMPLES_DB });
+      res.json({ managedUsers: MOCK_USERS_DB, logs: MOCK_LOGS_DB, transactions: MOCK_TRANSACTIONS_DB, miningResources: MOCK_RESOURCES_DB.map(calibrateServerMiningResource), valueEfficiencySnapshots: MOCK_SNAPSHOTS_DB, acceptanceRecords: MOCK_ACCEPTANCE_DB, circuitBreakers: MOCK_RDQ_DB, rdq: MOCK_RDQ_DB, meetingSamples: MOCK_MEETING_SAMPLES_DB });
     } catch (error) {
       console.error('Workspace recovery failure:', error);
-      res.json({ managedUsers: MOCK_USERS_DB, logs: MOCK_LOGS_DB, transactions: MOCK_TRANSACTIONS_DB, miningResources: MOCK_RESOURCES_DB, valueEfficiencySnapshots: MOCK_SNAPSHOTS_DB, acceptanceRecords: MOCK_ACCEPTANCE_DB, circuitBreakers: MOCK_RDQ_DB, rdq: MOCK_RDQ_DB, meetingSamples: MOCK_MEETING_SAMPLES_DB });
+      res.json({ managedUsers: MOCK_USERS_DB, logs: MOCK_LOGS_DB, transactions: MOCK_TRANSACTIONS_DB, miningResources: MOCK_RESOURCES_DB.map(calibrateServerMiningResource), valueEfficiencySnapshots: MOCK_SNAPSHOTS_DB, acceptanceRecords: MOCK_ACCEPTANCE_DB, circuitBreakers: MOCK_RDQ_DB, rdq: MOCK_RDQ_DB, meetingSamples: MOCK_MEETING_SAMPLES_DB });
     }
   });
 
 const PROCESSED_IMPORT_BATCH_IDS = new Set<string>();
+
+/**
+ * 服务端矿山双轨初限校准器 (SSOT)：
+ * 确保款初与产初存库均为提纯后净值。若存在历史毛额产初，服务端自动校准为 ×0.933 净值，防二次折减。
+ */
+function calibrateServerMiningResource(r: any): any {
+  if (!r) return r;
+  const initRev = Number(r.initialRevenueCapacity !== undefined ? r.initialRevenueCapacity : (r.revenueCapacity || 0));
+  const initVal = Number(r.initialValueCapacity !== undefined ? r.initialValueCapacity : (r.valueCapacity || 0));
+
+  const isLegacyGrossVal = initRev > 0 && initVal > 0 && (
+    Math.abs(initVal - Math.round(initRev / 0.933)) <= 3 ||
+    (initVal > initRev && Math.abs(Math.round(initVal * 0.933) - initRev) <= 3)
+  );
+
+  if (!isLegacyGrossVal) return r;
+
+  const calibratedVal = Math.round(initVal * 0.933);
+  return {
+    ...r,
+    initialValueCapacity: calibratedVal,
+    valueCapacity: calibratedVal,
+    initialValueLimit: calibratedVal,
+    unconfirmedValue: Math.max(0, calibratedVal - (Number(r.confirmedValue) || 0) - (Number(r.pendingValue) || 0) - (Number(r.minedValue) || 0))
+  };
+}
 
 function isServerCreationMiningLog(l: any): boolean {
   if (!l) return false;
@@ -557,7 +583,8 @@ function validateLogQuotasServer(
 
       const combinedLogs = [...(logs || []), ...(dtcb || [])];
       
-      const currentResources = (miningResources && miningResources.length > 0) ? miningResources : MOCK_RESOURCES_DB;
+      const normalizedIncomingResources = miningResources ? miningResources.map(calibrateServerMiningResource) : miningResources;
+      const currentResources = (normalizedIncomingResources && normalizedIncomingResources.length > 0) ? normalizedIncomingResources : MOCK_RESOURCES_DB.map(calibrateServerMiningResource);
       const { validLogs: logsToSync, failedRows } = validateLogQuotasServer(combinedLogs, MOCK_LOGS_DB, currentResources);
 
       if (failedRows.length > 0) {
@@ -624,8 +651,8 @@ function validateLogQuotasServer(
           }
 
           // Sync Resources
-          if (miningResources) {
-            for (const r of miningResources) {
+          if (normalizedIncomingResources) {
+            for (const r of normalizedIncomingResources) {
               await connection.execute(
                 `INSERT INTO mining_resources (
                   id, initialRevenueCapacity, initialValueCapacity, revenueCapacity, valueCapacity,
@@ -728,7 +755,7 @@ function validateLogQuotasServer(
         MOCK_LOGS_DB = logsToSync;
       }
       if (transactions) MOCK_TRANSACTIONS_DB = transactions;
-      if (miningResources) MOCK_RESOURCES_DB = miningResources;
+      if (normalizedIncomingResources) MOCK_RESOURCES_DB = normalizedIncomingResources;
       if (valueEfficiencySnapshots) MOCK_SNAPSHOTS_DB = valueEfficiencySnapshots;
       if (acceptanceRecords) MOCK_ACCEPTANCE_DB = acceptanceRecords;
       if (req.body.jzfp) MOCK_JZFP_DB = req.body.jzfp;

@@ -5,6 +5,8 @@ import { MENU_ITEMS } from '../src/constants';
 import { checkUserPermission } from '../src/utils/business';
 import pkg from '../package.json';
 
+import { useTerms } from '../src/hooks/useTerms';
+
 interface SidebarProps {
   user: User;
   activeTab: string;
@@ -13,9 +15,27 @@ interface SidebarProps {
   auditPendingBadgeCount?: number;
 }
 
+const TAB_TO_TERM_KEY: Record<string, string> = {
+  resources: 'mining_resource',
+  audit: 'value_audit',
+  evaluation: 'value_evaluation',
+  reservoir: 'admin_management',
+  creation: 'value_creation',
+  consumption: 'dynamic_consumption',
+  transactions: 'internal_transaction',
+  distribution: 'value_distribution',
+  instructions: 'system_instructions',
+  kanban: 'business_dashboard',
+  collectors: 'collectors_pool',
+  personnel: 'personnel_pool',
+};
+
 const Sidebar: React.FC<SidebarProps> = ({ user, activeTab, setActiveTab, onUpdateAvatar, auditPendingBadgeCount }) => {
+  const { t } = useTerms();
   const menuItems = MENU_ITEMS.map(item => {
-    return { ...item, show: checkUserPermission(user, item.id) };
+    const termKey = TAB_TO_TERM_KEY[item.id];
+    const label = termKey ? t(termKey, item.label) : item.label;
+    return { ...item, label, show: checkUserPermission(user, item.id) };
   });
   
   const fileInputRef = useRef<HTMLInputElement>(null);

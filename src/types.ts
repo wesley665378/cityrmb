@@ -344,7 +344,7 @@ export interface ValueCreationLog {
    * @condition 只有当 status === 'Confirmed' 时，amount 才会被计入 MiningResource 的 confirmedRevenue 或 confirmedValue
    */
   status: AuditStatus;
-  confirmationType?: '收款确权' | '联动确权' | '手动确权' | string; // 历史数据可能含 '自动确权'，展示层统一映射为 '联动确权'
+  confirmationType?: '收款确权' | '联动确权' | '手动确权' | '消耗确权' | string; // 历史数据可能含 '自动确权'，展示层统一映射为 '联动确权'
   confirmedAt?: number; // 确权时间，用于3个月倒计时
   batchId?: string; // 导入批次ID
   deleted?: boolean;

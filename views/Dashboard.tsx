@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 import { ValueCreationLog, MiningResource, AuditStatus, RefineCategory, User, InternalTransaction, RefineType, Role, TransactionType, TransactionStatus, MeetingSample } from '../types';
@@ -35,6 +35,7 @@ import { formatMoney, roundMoney } from '@/utils/formatMoney';
 import { isDynamicCostLog } from '@/utils/costCategory';
 import { deriveProjectStatus } from '@/utils/projectStatus';
 import { formatProjectStatusLabel, formatRefineTypeLabel } from '@/utils/statusDisplay';
+import { useTerms } from '@/hooks/useTerms';
 
 const getProjectStatusBadgeClass = (status: string) => {
   switch (status) {
@@ -69,6 +70,7 @@ interface DashboardProps {
 type PeriodType = 'month' | 'quarter' | 'half' | 'year';
 
 const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, users, resources, currentUser, transactions, onSystemAdjustment, onSwitchTab, units, meetingSamples, onSaveMeetingSample }) => {
+  const { t } = useTerms();
   const activeJzczLogs = jzczLogs?.length ? jzczLogs : logs;
   const activeAuditLogs = auditLogs?.length ? auditLogs : logs;
   const { isCostVisible, toggleCostVisible, maskMoney, maskText } = useCostPrivacy();
@@ -97,6 +99,33 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
   const [filterCenter, setFilterCenter] = useState<string | null>(null);
   const [filterType, setFilterType] = useState<string | null>(null);
   const [filterPurity, setFilterPurity] = useState<string | null>(null);
+
+  const sandboxContainerRef = useRef<HTMLDivElement>(null);
+  const [sandboxScale, setSandboxScale] = useState<number>(1);
+
+  useEffect(() => {
+    const updateSandboxScale = () => {
+      if (sandboxContainerRef.current) {
+        const width = sandboxContainerRef.current.clientWidth;
+        if (width > 0) {
+          const newScale = Math.min(1, width / 1200);
+          setSandboxScale(newScale);
+        }
+      }
+    };
+
+    updateSandboxScale();
+    const observer = new ResizeObserver(updateSandboxScale);
+    if (sandboxContainerRef.current) {
+      observer.observe(sandboxContainerRef.current);
+    }
+    window.addEventListener('resize', updateSandboxScale);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateSandboxScale);
+    };
+  }, []);
 
   const isAdminOrNPC = useMemo(() => currentUser ? isAdminOrNpc(currentUser) : false, [currentUser]);
   const isGlobalReaderUser = useMemo(() => currentUser ? isGlobalReader(currentUser) : false, [currentUser]);
@@ -1515,14 +1544,26 @@ const Dashboard: React.FC<DashboardProps> = ({ logs = [], jzczLogs, auditLogs, u
               }
             `}</style>
             
-            <div className="relative w-full overflow-x-auto overflow-y-hidden rounded-2xl md:rounded-[1.5rem] border border-slate-200/90 shadow-sm mb-3 select-none custom-scrollbar bg-slate-50">
-              <div className="relative w-[1200px] h-[520px] min-w-[1200px] sandtable-canvas">
+            <div 
+              ref={sandboxContainerRef}
+              className="relative w-full max-w-[1200px] mx-auto overflow-hidden rounded-2xl md:rounded-[1.5rem] border border-slate-200/90 shadow-sm mb-3 select-none bg-slate-50 transition-all duration-150"
+              style={{ height: `${Math.round(520 * sandboxScale)}px` }}
+            >
+              <div 
+                className="relative w-[1200px] h-[520px] sandtable-canvas"
+                style={{
+                  transform: `scale(${sandboxScale})`,
+                  transformOrigin: 'top left',
+                  width: '1200px',
+                  height: '520px'
+                }}
+              >
                 {/* Sandtable Header */}
               <div className="absolute top-0 left-0 right-0 h-11 px-4 flex items-center justify-between z-30 border-b border-slate-200/80 bg-white/85 backdrop-blur-md">
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
                   <div className="text-sm md:text-base font-black text-slate-800 tracking-tight flex items-center gap-1.5">
-                    <span>价值流转沙盘</span>
+                    <span>{t('value_flow_sandbox', '价值流转沙盘')}</span>
                   </div>
                 </div>
                 {waterMetrics.incomeWaterPool < waterMetrics.rigidSalaryPackage && (

@@ -1,9 +1,9 @@
 import { User, MiningResource, ValueCreationLog, InternalTransaction } from '../../types';
-import { isGlobalReader, parseCenterList } from './accessControl';
+import { isGlobalReader, isCollectorsRosterReader, parseCenterList } from './accessControl';
 import { isVirtualDeductionMiningId } from './virtualDeduction';
 import { userCenterMatchesBusinessUnit } from './businessUnitName';
 
-export { isSystemAdmin, isGlobalReader as isGlobalScope, isGlobalReader, isAdminOrNpc, parseCenterList } from './accessControl';
+export { isSystemAdmin, isGlobalReader as isGlobalScope, isGlobalReader, isCollectorsWriter, isCollectorsRosterReader, isAdminOrNpc, parseCenterList } from './accessControl';
 export { isCenterManagerUser, sortCenterManagers, findCenterManager } from './centerManager';
 
 /**
@@ -22,10 +22,10 @@ export function centerMatch(centerA?: string | null, centerB?: string | null): b
  */
 export function filterUsersByCenter(users: User[], currentUser: User | null | undefined): User[] {
   if (!currentUser) return [];
-  if (isGlobalReader(currentUser)) return users;
+  if (isCollectorsRosterReader(currentUser)) return users;
   if (!currentUser.center) return [];
   return users.filter(u => {
-    if (isGlobalReader(u)) return true;
+    if (isCollectorsRosterReader(u)) return true;
     return centerMatch(u.center, currentUser.center);
   });
 }

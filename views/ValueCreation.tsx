@@ -28,6 +28,7 @@ import { calculateHedgeCapacitiesAndWeights, normalizeRefineTier, resolveLogRefi
 import { isDynamicCostLog } from '@/utils/costCategory';
 import { deriveProjectStatus, isProjectWritable } from '@/utils/projectStatus';
 import { isAdminOrNpc, parseCenterList, canExportExcel, getExportButtonTitle, EXPORT_DISABLED_TOOLTIP } from '@/utils/accessControl';
+import { useTerms } from '@/hooks/useTerms';
 import { SystemConfig } from '@/types';
 import { isSalaryActiveForMonth } from '@/utils/employmentStatus';
 import { userCenterMatchesBusinessUnit, businessUnitLabelsEqual } from '@/utils/businessUnitName';
@@ -212,6 +213,9 @@ interface ValueCreationProps {
   managedUsers?: User[];
   resources: MiningResource[];
   logs: ValueCreationLog[];
+  jzczLogs?: ValueCreationLog[];
+  hedgeLogs?: ValueCreationLog[];
+  auditLogs?: ValueCreationLog[];
   onLogSubmit: (log: ValueCreationLog | ValueCreationLog[], options?: { isImport?: boolean; skipSystemLogs?: boolean }) => void;
   onSwitchTab?: (tab: string) => void;
   transactions?: InternalTransaction[];
@@ -238,9 +242,11 @@ export const tierDisplayMap: Record<string, { name: string, desc: string }> = {
 };
 
 const ValueCreation: React.FC<ValueCreationProps> = ({ 
-  user, users = [], managedUsers: allManagedUsersProp, resources, logs, onLogSubmit, transactions = [], onConfirmTransaction, circuitBreakers = [], onAddCircuitBreaker,
+  user, users = [], managedUsers: allManagedUsersProp, resources, logs, jzczLogs: jzczLogsProp, hedgeLogs: hedgeLogsProp, auditLogs: auditLogsProp, onLogSubmit, transactions = [], onConfirmTransaction, circuitBreakers = [], onAddCircuitBreaker,
   quotaSnapshots = {}, processingLogIds = new Set(), persistWorkspaceWithOverrides, onPauseAutoSync, systemConfig
 }) => {
+  const { t } = useTerms();
+  const hedgeLogs = useMemo(() => hedgeLogsProp || auditLogsProp || logs, [hedgeLogsProp, auditLogsProp, logs]);
   const canExport = useMemo(() => canExportExcel(user, systemConfig), [user, systemConfig]);
   const miningReconciliations = useMemo(() => reconcileMiningLogs(logs, resources), [logs, resources]);
 
@@ -371,34 +377,42 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
 
   const getCClassCostForResource = React.useCallback((status: AuditStatus) => {
     if (selectedMiningId) {
-      return logs
+      return hedgeLogs
         .filter(l => 
+          l &&
           l.miningId === selectedMiningId && 
           isDynamicCostLog(l) &&
           l.costCategory === 'C' && 
-          l.dynamicCost > 0 && 
-          l.status === status
+          (Math.abs(Number(l.dynamicCost) || Number(l.amount) || 0)) > 0 && 
+          (l.status === status || 
+           (status === AuditStatus.Confirmed && ((l.status as string) === '已确权' || (l.status as string) === 'Confirmed')) || 
+           (status === AuditStatus.Approved && ((l.status as string) === '入库' || (l.status as string) === 'Approved')) ||
+           (status === AuditStatus.Pending && ((l.status as string) === '待确权' || (l.status as string) === 'Pending')))
         )
-        .reduce((sum, l) => sum + l.dynamicCost, 0);
+        .reduce((sum, l) => sum + (l.dynamicCost !== undefined && l.dynamicCost !== null && Number(l.dynamicCost) !== 0 ? Math.abs(Number(l.dynamicCost)) : Math.abs(Number(l.amount) || 0)), 0);
     }
     return 0;
-  }, [selectedMiningId, logs]);
+  }, [selectedMiningId, hedgeLogs]);
 
   const getB2ClassCostForResource = React.useCallback((status: AuditStatus) => {
     if (selectedMiningId) {
-      return logs
+      return hedgeLogs
         .filter(l => 
+          l &&
           l.miningId === selectedMiningId && 
           isDynamicCostLog(l) &&
           l.costCategory === 'B' && 
           l.valueConsumptionMode === 'B2' &&
-          l.dynamicCost > 0 && 
-          l.status === status
+          (Math.abs(Number(l.dynamicCost) || Number(l.amount) || 0)) > 0 && 
+          (l.status === status || 
+           (status === AuditStatus.Confirmed && ((l.status as string) === '已确权' || (l.status as string) === 'Confirmed')) || 
+           (status === AuditStatus.Approved && ((l.status as string) === '入库' || (l.status as string) === 'Approved')) ||
+           (status === AuditStatus.Pending && ((l.status as string) === '待确权' || (l.status as string) === 'Pending')))
         )
-        .reduce((sum, l) => sum + l.dynamicCost, 0);
+        .reduce((sum, l) => sum + (l.dynamicCost !== undefined && l.dynamicCost !== null && Number(l.dynamicCost) !== 0 ? Math.abs(Number(l.dynamicCost)) : Math.abs(Number(l.amount) || 0)), 0);
     }
     return 0;
-  }, [selectedMiningId, logs]);
+  }, [selectedMiningId, hedgeLogs]);
 
   const getCClassCostForCollector = React.useCallback((collectorId: string) => {
     // 保持兼容性，但现在返回资源维度的总消耗
@@ -691,8 +705,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   const getHedgeWeight = React.useCallback((collectorId: string, amount: number) => {
     if (!selectedResource) return { cWeight: 1, b2Weight: 1, combined: 1 };
 
-    const allResourceLogs = logs.filter(l => l && l.miningId === selectedMiningId && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved));
-    const hedgeInfo = calculateHedgeCapacitiesAndWeights(selectedResource, allResourceLogs);
+    const hedgeInfo = calculateHedgeCapacitiesAndWeights(selectedResource, hedgeLogs);
     
     const isRevenue = selectedCategory === RefineCategory.Revenue;
     const cWeight = hedgeInfo.cWeightRev;
@@ -703,7 +716,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       b2Weight,
       combined: isRevenue ? cWeight : cWeight * b2Weight
     };
-  }, [selectedCategory, selectedResource, logs, selectedMiningId]);
+  }, [selectedCategory, selectedResource, hedgeLogs]);
 
   const calculateNetValueForCollector = React.useCallback((collectorId: string, amount: number) => {
     const factor = getFactorForCollector(collectorId);
@@ -801,8 +814,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   const dataIntegrityStatus = useMemo(() => {
     if (!selectedResource) return { ok: true, msg: '等待选择矿山', stats: null };
     
-    const allResourceLogs = logs.filter(l => l && l.miningId === selectedMiningId && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved));
-    const hedgeInfo = calculateHedgeCapacitiesAndWeights(selectedResource, allResourceLogs);
+    const hedgeInfo = calculateHedgeCapacitiesAndWeights(selectedResource, hedgeLogs);
 
     const pendingC = getCClassCostForResource(AuditStatus.Pending);
     const pendingB2 = getB2ClassCostForResource(AuditStatus.Pending);
@@ -819,7 +831,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         b2Weight: hedgeInfo.b2Weight 
       }
     };
-  }, [selectedResource, getCClassCostForResource, getB2ClassCostForResource, logs, selectedMiningId, selectedCategory]);
+  }, [selectedResource, getCClassCostForResource, getB2ClassCostForResource, hedgeLogs, selectedCategory]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1002,8 +1014,8 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
     });
 
     const totalPPre = preCalculated.reduce((sum, c) => sum + c.pPre, 0);
-    const kFactor = (isValueCategory && totalPPre > (getCurrentValueCapacity(selectedResource) || 0)) 
-        ? (getCurrentValueCapacity(selectedResource) / totalPPre) 
+    const kFactor = (isValueCategory && totalPPre > (getCurrentValueCapacity(selectedResource, hedgeLogs) || 0)) 
+        ? (getCurrentValueCapacity(selectedResource, hedgeLogs) / totalPPre) 
         : 1.0;
 
     selectedCollectors.forEach((c, index) => {
@@ -1029,7 +1041,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                 dynamicCost: 0,
                 cClassCost: cCost,
                 cClassRatio: weights.cWeight,
-                b2ClassRatio: weights.b2Weight,
+                b2ClassRatio: selectedCategory === RefineCategory.Revenue ? 1 : weights.b2Weight,
                 netValue: netValue,
                 timestamp: Date.now(),
                 status: status,
@@ -1655,8 +1667,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
           }
         }
 
-        const allResourceLogs = logs.filter(l => l && l.miningId === miningId && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved));
-        const hedgeInfo = calculateHedgeCapacitiesAndWeights(resource, allResourceLogs);
+        const hedgeInfo = calculateHedgeCapacitiesAndWeights(resource, hedgeLogs);
         const cWeight = hedgeInfo.cWeightRev;
         const b2Weight = hedgeInfo.b2Weight;
 
@@ -1669,7 +1680,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             pPre = calculateT1PlusRevenue(initialNetAmount, !!isHighExpert, tierStr as any, cWeight);
         }
         
-        const currentCap = getCurrentValueCapacity(resource) || 0;
+        const currentCap = getCurrentValueCapacity(resource, hedgeLogs) || 0;
         const kFactor = (category === RefineCategory.Value && pPre > currentCap)
            ? (currentCap / pPre)
            : 1.0;
@@ -1720,7 +1731,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
           dynamicCost: 0,
           cClassCost: getCClassCostForCollector(collector.id),
           cClassRatio: cWeight,
-          b2ClassRatio: b2Weight,
+          b2ClassRatio: category === RefineCategory.Revenue ? 1 : b2Weight,
           netValue: netValue,
           timestamp: Date.now(),
           status: AuditStatus.Pending,
@@ -1843,7 +1854,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
           } else {
             pPre = calculateT1PlusRevenue(finalAmount, !!r.isHighExpert, r.tierStr as any, r.cWeight);
           }
-          const currentCap = getCurrentValueCapacity(r.resource) || 0;
+          const currentCap = getCurrentValueCapacity(r.resource, hedgeLogs) || 0;
           const kFactor = (r.category === RefineCategory.Value && pPre > currentCap)
              ? (currentCap / pPre)
              : 1.0;
@@ -1882,9 +1893,15 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       const collector = resolveCollector(log.recordedCollectorId, allUsers);
       const resource = resources.find(r => r.id === log.miningId);
       
-      const weightInfo = getHedgeWeight(log.recordedCollectorId || '', log.amount);
-      const cWeight = log.cClassRatio !== undefined ? log.cClassRatio : weightInfo.cWeight;
-      const b2Weight = log.b2ClassRatio !== undefined ? log.b2ClassRatio : weightInfo.b2Weight;
+      let fallbackCWeight = 1;
+      let fallbackB2Weight = 1;
+      if (resource) {
+        const hInfo = calculateHedgeCapacitiesAndWeights(resource, hedgeLogs);
+        fallbackCWeight = hInfo.cWeightRev;
+        fallbackB2Weight = hInfo.b2Weight;
+      }
+      const cWeight = (log.cClassRatio !== undefined && log.cClassRatio !== null) ? Number(log.cClassRatio) : fallbackCWeight;
+      const b2Weight = (log.b2ClassRatio !== undefined && log.b2ClassRatio !== null) ? Number(log.b2ClassRatio) : fallbackB2Weight;
       const factor = getLogRefineFactor(log, resource, collector);
       const rawAmount = log.rawAmount || log.amount || 0;
 
@@ -1974,13 +1991,13 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
       </div>
 
       {/* 申报区 */}
-      <Card title="提交提炼价值确权" noPadding>
+      <Card title={`提交提炼${t('value_audit', '价值确权')}`} noPadding>
         <form onSubmit={handleSubmit} className="p-4 md:p-6 space-y-4 md:space-y-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
             {/* 第 1 行 - 左：采集主体 */}
             <div className="flex flex-col space-y-1.5 sm:col-span-1 lg:col-span-2">
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
-                采集主体 <span className="text-rose-500 ml-1 font-bold">*</span>
+                {t('collector', '采集主体')} <span className="text-rose-500 ml-1 font-bold">*</span>
               </label>
               <select 
                 value="" 
@@ -2202,9 +2219,21 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                 {selectedMiningId && (
                   <div className="w-full bg-slate-50 border border-slate-200 p-3 rounded-md shadow-sm space-y-2">
                     <div className="flex justify-between items-center text-[9px] font-bold">
-                       <span className="text-slate-500">款初: <span className="text-indigo-600">{formatMoney(getInitialRevenueCapacity(selectedResource))}</span> | 款当: <span className="text-amber-600">{formatMoney(getCurrentRevenueCapacity(selectedResource, logs))}</span></span>
-                       <span className="text-slate-500">产初: <span className="text-indigo-600">{formatMoney(getInitialValueCapacity(selectedResource))}</span> | 产当: <span className="text-emerald-600">{formatMoney(getCurrentValueCapacity(selectedResource, logs))}</span></span>
+                       <span className="text-slate-500">款初: <span className="text-indigo-600">{formatMoney(getInitialRevenueCapacity(selectedResource))}</span> | 款当: <span className="text-amber-600">{formatMoney(getCurrentRevenueCapacity(selectedResource, hedgeLogs))}</span></span>
+                       <span className="text-slate-500">产初: <span className="text-indigo-600">{formatMoney(getInitialValueCapacity(selectedResource))}</span> | 产当: <span className="text-emerald-600">{formatMoney(getCurrentValueCapacity(selectedResource, hedgeLogs))}</span></span>
                     </div>
+                    {(() => {
+                      const hedgeInfo = calculateHedgeCapacitiesAndWeights(selectedResource, hedgeLogs);
+                      if (hedgeInfo.C > 0 || hedgeInfo.B2 > 0) {
+                        return (
+                          <div className="flex justify-between items-center text-[9px] font-bold text-slate-500 border-t border-slate-200/60 pt-1.5">
+                            <span>已确权消耗: <span className="text-amber-600">ΣC: {formatMoney(hedgeInfo.C)}</span> | <span className="text-emerald-600">ΣB2: {formatMoney(hedgeInfo.B2)}</span></span>
+                            <span>实时对冲权: <span className="text-indigo-600">C权: {hedgeInfo.cWeightRev.toFixed(4)}</span> | <span className="text-emerald-600">B2权: {hedgeInfo.b2Weight.toFixed(4)}</span></span>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
                     <div className="flex justify-between items-center text-[9px] font-bold">
                        <span className="text-slate-500">已注入累计: <span className="text-blue-600">{formatMoney(alreadyInjected)}</span></span>
                        <span className="text-slate-500">剩余接收额度: <span className={(receivedLimit !== Infinity && remainingQuota < selectedCollectors.reduce((s, c) => s + c.amount, 0)) ? "text-rose-600" : "text-emerald-600"}>
@@ -2360,17 +2389,17 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
           {selectedResource && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-8 bg-slate-50/50 p-4 rounded-sm border border-slate-100 animate-in slide-in-from-left-2 duration-300">
                <ProgressBar 
-                 label=" 收款目前矿山资源进度" 
-                 subLabel={(rawInputOccupancy.revenue.confirmed + rawInputOccupancy.revenue.mined) >= getCurrentRevenueCapacity(selectedResource) ? "已采集" : `${formatMoney(rawInputOccupancy.revenue.confirmed + rawInputOccupancy.revenue.mined)} / ${formatMoney(getCurrentRevenueCapacity(selectedResource))}`}
-                 value={Math.min(rawInputOccupancy.revenue.confirmed + rawInputOccupancy.revenue.mined, getCurrentRevenueCapacity(selectedResource))}
-                 max={getCurrentRevenueCapacity(selectedResource)}
+                 label={` ${t('revenue', '收款')}目前${t('mining_resource', '矿山资源')}进度`} 
+                 subLabel={(rawInputOccupancy.revenue.confirmed + rawInputOccupancy.revenue.mined) >= getCurrentRevenueCapacity(selectedResource, hedgeLogs) ? "已采集" : `${formatMoney(rawInputOccupancy.revenue.confirmed + rawInputOccupancy.revenue.mined)} / ${formatMoney(getCurrentRevenueCapacity(selectedResource, hedgeLogs))}`}
+                 value={Math.min(rawInputOccupancy.revenue.confirmed + rawInputOccupancy.revenue.mined, getCurrentRevenueCapacity(selectedResource, hedgeLogs))}
+                 max={getCurrentRevenueCapacity(selectedResource, hedgeLogs)}
                  color="bg-amber-500"
                />
                <ProgressBar 
-                 label=" 产值目前矿山资源进度" 
-                 subLabel={(rawInputOccupancy.value.confirmed + rawInputOccupancy.value.mined) >= getCurrentValueCapacity(selectedResource) ? "已采集" : `${formatMoney(rawInputOccupancy.value.confirmed + rawInputOccupancy.value.mined)} / ${formatMoney(getCurrentValueCapacity(selectedResource))}`}
-                 value={Math.min(rawInputOccupancy.value.confirmed + rawInputOccupancy.value.mined, getCurrentValueCapacity(selectedResource))}
-                 max={getCurrentValueCapacity(selectedResource)}
+                 label={` ${t('production_value', '产值')}目前${t('mining_resource', '矿山资源')}进度`} 
+                 subLabel={(rawInputOccupancy.value.confirmed + rawInputOccupancy.value.mined) >= getCurrentValueCapacity(selectedResource, hedgeLogs) ? "已采集" : `${formatMoney(rawInputOccupancy.value.confirmed + rawInputOccupancy.value.mined)} / ${formatMoney(getCurrentValueCapacity(selectedResource, hedgeLogs))}`}
+                 value={Math.min(rawInputOccupancy.value.confirmed + rawInputOccupancy.value.mined, getCurrentValueCapacity(selectedResource, hedgeLogs))}
+                 max={getCurrentValueCapacity(selectedResource, hedgeLogs)}
                  color="bg-emerald-500"
                />
             </div>
@@ -2532,19 +2561,19 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
               const currentPending = mineralOccupancy.pendingValue;
               const currentConfirmed = mineralOccupancy.confirmedValue;
               const totalPending = currentPending + totalInput;
-              const capacityRemaining = getCurrentRevenueCapacity(selectedResource) - currentConfirmed;
+              const capacityRemaining = getCurrentRevenueCapacity(selectedResource, hedgeLogs) - currentConfirmed;
               const revenueBasedLimit = Math.max(0, mineralOccupancy.confirmedRevenue - currentConfirmed);
               const conversionAmount = capacityRemaining <= 0 ? 0 : Math.min(totalPending, revenueBasedLimit);
               const finalPending = totalPending - conversionAmount;
               const finalConfirmed = currentConfirmed + conversionAmount;
-              const remainingUnconfirmed = Math.max(0, getCurrentValueCapacity(selectedResource) - finalConfirmed - finalPending);
-              const confirmationRate = Math.round((finalConfirmed / (getCurrentValueCapacity(selectedResource) || 1)) * 100);
+              const remainingUnconfirmed = Math.max(0, getCurrentValueCapacity(selectedResource, hedgeLogs) - finalConfirmed - finalPending);
+              const confirmationRate = Math.round((finalConfirmed / (getCurrentValueCapacity(selectedResource, hedgeLogs) || 1)) * 100);
 
               return (
                 <div className="bg-emerald-50 p-4 rounded-sm border border-emerald-200 mt-2 space-y-3">
                   <div className="flex justify-between items-center">
-                    <p className="text-[10px] font-bold text-emerald-800 uppercase">矿山资源确权预览 (实时计算)</p>
-                    <span className="text-[8px] font-bold text-emerald-600 bg-white px-2 py-0.5 rounded border border-emerald-100">联动确权已启用</span>
+                    <p className="text-[10px] font-bold text-emerald-800 uppercase">{t('mining_resource', '矿山资源')}{t('status_confirmed', '确权')}预览 (实时计算)</p>
+                    <span className="text-[8px] font-bold text-emerald-600 bg-white px-2 py-0.5 rounded border border-emerald-100">{t('linked_audit', '联动确权')}已启用</span>
                   </div>
                   
                   <div className="bg-white/60 p-2 rounded border border-emerald-200/50">
@@ -2584,7 +2613,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                   </div>
 
                   <div className="text-[8px] text-emerald-600/70 font-bold uppercase pt-2 border-t border-emerald-100 flex justify-between">
-                    <span>产当：{formatMoney(getCurrentValueCapacity(selectedResource))}</span>
+                    <span>产当：{formatMoney(getCurrentValueCapacity(selectedResource, hedgeLogs))}</span>
                     <span>预计确权率：{confirmationRate}%</span>
                   </div>
                 </div>
@@ -2653,7 +2682,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                       : 'bg-slate-900 text-white hover:bg-blue-600'
                   }`}
                 >
-                  {maxAllowed <= 0 ? '资源已枯竭/满额' : '提交提炼价值确权'}
+                  {maxAllowed <= 0 ? '资源已枯竭/满额' : `提交提炼${t('value_audit', '价值确权')}`}
                 </button>
               </div>
             )}
@@ -2663,7 +2692,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
 
       {/* 入库记录与效能看板 */}
       <Card 
-        title="价值确权记录" 
+        title={`${t('value_audit', '价值确权')}记录`} 
         noPadding
         headerAction={
           <div className="flex items-center space-x-2">
@@ -2836,9 +2865,15 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             const collector = resolveCollector(log.recordedCollectorId, allUsers);
             const resource = resources.find(r => r.id === log.miningId);
             
-            const weightInfo = getHedgeWeight(log.recordedCollectorId || '', log.amount);
-            const cWeight = log.cClassRatio !== undefined ? log.cClassRatio : weightInfo.cWeight;
-            const b2Weight = log.b2ClassRatio !== undefined ? log.b2ClassRatio : weightInfo.b2Weight;
+            let fallbackCWeight = 1;
+            let fallbackB2Weight = 1;
+            if (resource) {
+              const hInfo = calculateHedgeCapacitiesAndWeights(resource, hedgeLogs);
+              fallbackCWeight = hInfo.cWeightRev;
+              fallbackB2Weight = hInfo.b2Weight;
+            }
+            const cWeight = (log.cClassRatio !== undefined && log.cClassRatio !== null) ? Number(log.cClassRatio) : fallbackCWeight;
+            const b2Weight = (log.b2ClassRatio !== undefined && log.b2ClassRatio !== null) ? Number(log.b2ClassRatio) : fallbackB2Weight;
             const factor = getLogRefineFactor(log, resource, collector);
             const rawAmount = log.rawAmount || log.amount || 0;
 
@@ -2955,9 +2990,15 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                 const collector = resolveCollector(log.recordedCollectorId, allUsers);
                 const resource = resources.find(r => r.id === log.miningId);
                 
-                const weightInfo = getHedgeWeight(log.recordedCollectorId || '', log.amount);
-                const cWeight = log.cClassRatio !== undefined ? log.cClassRatio : weightInfo.cWeight;
-                const b2Weight = log.b2ClassRatio !== undefined ? log.b2ClassRatio : weightInfo.b2Weight;
+                let fallbackCWeight = 1;
+                let fallbackB2Weight = 1;
+                if (resource) {
+                  const hInfo = calculateHedgeCapacitiesAndWeights(resource, hedgeLogs);
+                  fallbackCWeight = hInfo.cWeightRev;
+                  fallbackB2Weight = hInfo.b2Weight;
+                }
+                const cWeight = (log.cClassRatio !== undefined && log.cClassRatio !== null) ? Number(log.cClassRatio) : fallbackCWeight;
+                const b2Weight = (log.b2ClassRatio !== undefined && log.b2ClassRatio !== null) ? Number(log.b2ClassRatio) : fallbackB2Weight;
                 const factor = getLogRefineFactor(log, resource, collector);
                 const rawAmount = log.rawAmount || log.amount || 0;
 
@@ -2983,10 +3024,10 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                           <span className="text-[10px] font-mono font-bold text-slate-600">{log.miningId}</span>
                           {resource && (
                             <div className="flex h-1 w-24 bg-slate-100 rounded-full overflow-hidden mt-1 shadow-inner">
-                               <div style={{ width: `${((log.category === RefineCategory.Revenue ? resource.pendingRevenue : resource.pendingValue) / ((log.category === RefineCategory.Revenue ? getCurrentRevenueCapacity(resource) : getCurrentValueCapacity(resource)) + (log.category === RefineCategory.Revenue ? resource.minedRevenue : resource.minedValue) || 1)) * 100}%` }} className="bg-amber-400 h-full" />
-                               <div style={{ width: `${((log.category === RefineCategory.Revenue ? resource.confirmedRevenue : resource.confirmedValue) / ((log.category === RefineCategory.Revenue ? getCurrentRevenueCapacity(resource) : getCurrentValueCapacity(resource)) + (log.category === RefineCategory.Revenue ? resource.minedRevenue : resource.minedValue) || 1)) * 100}%` }} className="bg-emerald-500 h-full" />
-                               <div style={{ width: `${((log.category === RefineCategory.Revenue ? resource.unconfirmedRevenue : resource.unconfirmedValue) / ((log.category === RefineCategory.Revenue ? getCurrentRevenueCapacity(resource) : getCurrentValueCapacity(resource)) + (log.category === RefineCategory.Revenue ? resource.minedRevenue : resource.minedValue) || 1)) * 100}%` }} className="bg-slate-300 h-full" />
-                               <div style={{ width: `${((log.category === RefineCategory.Revenue ? resource.minedRevenue : resource.minedValue) / ((log.category === RefineCategory.Revenue ? getCurrentRevenueCapacity(resource) : getCurrentValueCapacity(resource)) + (log.category === RefineCategory.Revenue ? resource.minedRevenue : resource.minedValue) || 1)) * 100}%` }} className="bg-blue-500 h-full" />
+                               <div style={{ width: `${((log.category === RefineCategory.Revenue ? resource.pendingRevenue : resource.pendingValue) / ((log.category === RefineCategory.Revenue ? getCurrentRevenueCapacity(resource, hedgeLogs) : getCurrentValueCapacity(resource, hedgeLogs)) + (log.category === RefineCategory.Revenue ? resource.minedRevenue : resource.minedValue) || 1)) * 100}%` }} className="bg-amber-400 h-full" />
+                               <div style={{ width: `${((log.category === RefineCategory.Revenue ? resource.confirmedRevenue : resource.confirmedValue) / ((log.category === RefineCategory.Revenue ? getCurrentRevenueCapacity(resource, hedgeLogs) : getCurrentValueCapacity(resource, hedgeLogs)) + (log.category === RefineCategory.Revenue ? resource.minedRevenue : resource.minedValue) || 1)) * 100}%` }} className="bg-emerald-500 h-full" />
+                               <div style={{ width: `${((log.category === RefineCategory.Revenue ? resource.unconfirmedRevenue : resource.unconfirmedValue) / ((log.category === RefineCategory.Revenue ? getCurrentRevenueCapacity(resource, hedgeLogs) : getCurrentValueCapacity(resource, hedgeLogs)) + (log.category === RefineCategory.Revenue ? resource.minedRevenue : resource.minedValue) || 1)) * 100}%` }} className="bg-slate-300 h-full" />
+                               <div style={{ width: `${((log.category === RefineCategory.Revenue ? resource.minedRevenue : resource.minedValue) / ((log.category === RefineCategory.Revenue ? getCurrentRevenueCapacity(resource, hedgeLogs) : getCurrentValueCapacity(resource, hedgeLogs)) + (log.category === RefineCategory.Revenue ? resource.minedRevenue : resource.minedValue) || 1)) * 100}%` }} className="bg-blue-500 h-full" />
                             </div>
                           )}
                        </div>

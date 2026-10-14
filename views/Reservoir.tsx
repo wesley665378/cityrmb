@@ -39,6 +39,7 @@ import { CostPrivacyToggle } from '../src/components/CostPrivacyToggle';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCostPrivacy, formatCostDisplay } from '../src/hooks/useCostPrivacy';
 import { UI_LABELS } from '../src/constants/uiLabels';
+import { useTerms } from '../src/hooks/useTerms';
 
 interface ReservoirProps {
   logs: ValueCreationLog[];
@@ -422,6 +423,7 @@ const ReservoirVisualizer: React.FC<{
 };
 
 const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users, transactions = [], units, currentUser, systemConfig }) => {
+  const { t } = useTerms();
   const canExport = useMemo(() => canExportExcel(currentUser, systemConfig), [currentUser, systemConfig]);
   const [selectedMonth, setSelectedMonth] = useState(() => getLocalMonthString()); // YYYY-MM
   const [startDate, setStartDate] = useState<string>('');
@@ -559,7 +561,7 @@ const Reservoir: React.FC<ReservoirProps> = ({ logs, auditLogs, resources, users
             </span>
           </div>
           <h2 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">
-            统筹水库管理
+            {t('admin_management', '后台管理')} · 统筹水库管理
           </h2>
 
         </div>

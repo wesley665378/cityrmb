@@ -45,7 +45,8 @@ export const MENU_ITEMS = [
   { id: 'transactions', label: '内部交易', icon: '🤝' },
   { id: 'evaluation', label: '价值评价', icon: '⚖️' },
   { id: 'distribution', label: '价值分配', icon: '💸' },
-  { id: 'reservoir', label: '水库管理', icon: '🌊' },
+  { id: 'reservoir', label: '后台管理', icon: '⚙️' },
+  { id: 'collectors', label: '采集主体', icon: '📋' },
   { id: 'personnel', label: '人事矩阵', icon: '👥' },
   { id: 'account', label: '我的帐户', icon: '👤' },
   { id: 'instructions', label: '系统说明', icon: '📖' }

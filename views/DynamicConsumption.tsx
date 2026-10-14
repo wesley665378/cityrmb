@@ -21,6 +21,8 @@ import { calculateConsumptionMirrorFields } from '../src/utils/business';
 import { formatCollectorDisplay } from '../src/utils/collector';
 import { formatAuditStatusLabel } from '../src/utils/statusDisplay';
 import { resolveSystemCollectorIdForWrite } from '../src/utils/collector';
+import { isDynamicCostLog } from '../src/utils/costCategory';
+import { useTerms } from '../src/hooks/useTerms';
 import {
   getInitialRevenueCapacity,
   getInitialValueCapacity,
@@ -183,18 +185,25 @@ const CardHeader: React.FC<{ title: string; extra?: React.ReactNode }> = ({ titl
 const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({ 
   user, users, resources, logs, jzczLogs, dtcbLogs, onLogSubmit, persistWorkspaceWithOverrides, updateLastSyncedFingerprint, systemConfig 
 }) => {
+  const { t } = useTerms();
   const canExport = useMemo(() => canExportExcel(user, systemConfig), [user, systemConfig]);
   const { isCostVisible, toggleCostVisible, maskMoney, maskText } = useCostPrivacy();
   const { isLocked } = useDedupe(500);
   const { isBroken, retryAfter, recordFailure, recordSuccess } = useCircuitBreaker();
 
   const jzczLogsToUse = useMemo(() => {
-    return jzczLogs || logs.filter(l => l.confirmationType !== '手动确权');
+    return jzczLogs || logs.filter(l => !isDynamicCostLog(l) && l.confirmationType !== '消耗确权' && l.confirmationType !== '手动确权');
   }, [jzczLogs, logs]);
 
   const dtcbLogsToUse = useMemo(() => {
-    return dtcbLogs || logs.filter(l => l.confirmationType === '手动确权');
+    return dtcbLogs || logs.filter(l => l.confirmationType === '消耗确权' || l.confirmationType === '手动确权' || isDynamicCostLog(l));
   }, [dtcbLogs, logs]);
+
+  const combinedAllLogs = useMemo(() => {
+    const existingIds = new Set(logs.map(l => l.id));
+    const dtcbToAdd = (dtcbLogsToUse || []).filter(l => !existingIds.has(l.id));
+    return dtcbToAdd.length > 0 ? [...logs, ...dtcbToAdd] : logs;
+  }, [logs, dtcbLogsToUse]);
 
   const getRoleChineseName = (userOrRole?: User | Role | string): string => {
     if (!userOrRole) return '采集主体';
@@ -322,12 +331,21 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
   // 获取当前选中的权重 (对冲后权重)
   const hedgeInfo = useMemo(() => {
     if (!selectedResource) return null;
-    const allResourceLogs = logs.filter(l => l && l.miningId === selectedMiningId && (l.status === AuditStatus.Confirmed || l.status === AuditStatus.Approved));
+    const allResourceLogs = combinedAllLogs.filter(l => 
+      l && 
+      l.miningId === selectedMiningId && 
+      (l.status === AuditStatus.Confirmed || 
+       l.status === AuditStatus.Approved || 
+       (l.status as string) === '已确权' || 
+       (l.status as string) === '入库' || 
+       (l.status as string) === 'Confirmed' || 
+       (l.status as string) === 'Approved')
+    );
     return calculateHedgeCapacitiesAndWeights(selectedResource, allResourceLogs);
-  }, [selectedResource, logs, selectedMiningId]);
+  }, [selectedResource, combinedAllLogs, selectedMiningId]);
 
   const revenueWeight = hedgeInfo ? hedgeInfo.cWeightRev : 1;
-  const valueWeight = hedgeInfo ? hedgeInfo.b2Weight : 1;
+  const valueWeight = hedgeInfo ? (hedgeInfo.cWeightVal * hedgeInfo.b2Weight) : 1;
 
   const sharedWeight = useMemo(() => {
     return selectedCategory === RefineCategory.Revenue ? revenueWeight : valueWeight;
@@ -376,6 +394,10 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
     }
   }, [selectedType, selectedCollector, leaveDays, workingDays]);
 
+  const isSysCollector = useMemo(() => {
+    return (costCategory === 'B' && valueConsumptionMode === 'B2') || costCategory === 'C';
+  }, [costCategory, valueConsumptionMode]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isLocked('dc-submit')) return;
@@ -387,7 +409,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
       return;
     }
 
-    if ((!isD && !selectedMiningId) || !selectedType || (!recordedCollectorId && !isB2 && !isD) || dynamicCost <= 0) {
+    if ((!isD && !selectedMiningId) || !selectedType || (!recordedCollectorId && !isSysCollector && !isD) || dynamicCost <= 0) {
       showAlert('请确保“采集主体”、“消耗类型”及“关联信息”已完整填写且数值大于0。');
       return;
     }
@@ -399,7 +421,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
       `确定提报动态消耗申请？\n\n【类别】${categoryLabel}类消耗\n${mineNotice}\n【数值】${Math.round(dynamicCost).toLocaleString()}\n【归属月份】${businessMonth}`,
       async () => {
         const status = AuditStatus.Pending;
-        const confirmationType = '手动确权';
+        const confirmationType = '消耗确权';
 
         const newLog: ValueCreationLog = {
           id: `${selectedCategory === RefineCategory.Revenue ? 'J' : 'M'}${(Date.now() % 100000000).toString().padStart(8, '0')}`,
@@ -493,7 +515,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
           businessDate: businessDate,
           month: businessDate.slice(0, 7),
           status: AuditStatus.Pending,
-          confirmationType: '手动确权'
+          confirmationType: '消耗确权'
         };
 
         onLogSubmit(deductionLog);
@@ -524,7 +546,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
       return;
     }
     const dataToExport = consumptionLogs.map(log => {
-      const { cWeightValue, b2WeightValue, revLimitStr, valLimitCStr, valLimitB2Str } = calculateConsumptionMirrorFields(log, resources, logs);
+      const { cWeightValue, b2WeightValue, revLimitStr, valLimitCStr, valLimitB2Str } = calculateConsumptionMirrorFields(log, resources, combinedAllLogs);
 
       return {
         '申报编号': log.id.startsWith('#') ? log.id : `#${log.id}`,
@@ -559,9 +581,9 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
     let list = dtcbLogsToUse.filter(l => (l.dynamicCost > 0 || l.type === RefineType.NonEffectiveHours));
     
     // Status Filter
-    if (activeTab === 'pending') list = list.filter(l => l.status === AuditStatus.Pending);
-    else if (activeTab === 'approved') list = list.filter(l => l.status === AuditStatus.Approved);
-    else if (activeTab === 'rejected') list = list.filter(l => l.status === AuditStatus.Rejected);
+    if (activeTab === 'pending') list = list.filter(l => l.status === AuditStatus.Pending || (l.status as string) === '待确权' || (l.status as string) === 'Pending');
+    else if (activeTab === 'approved') list = list.filter(l => l.status === AuditStatus.Approved || l.status === AuditStatus.Confirmed || (l.status as string) === '已确权' || (l.status as string) === '入库' || (l.status as string) === 'Approved' || (l.status as string) === 'Confirmed');
+    else if (activeTab === 'rejected') list = list.filter(l => l.status === AuditStatus.Rejected || (l.status as string) === 'Rejected' || (l.status as string) === '驳回');
 
     // Existing Center/Operator filter
     const isAdmin = isGlobalReader(user);
@@ -589,7 +611,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
       
       {/* 申报表单卡片 */}
       <Card 
-        title="动态消耗申报" 
+        title={`${t('dynamic_consumption', '动态消耗')}申报`} 
         noPadding
         headerAction={
           <div className="flex items-center gap-1.5 bg-slate-100/80 p-1 rounded-md border border-slate-200/60">
@@ -602,7 +624,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                   : 'text-slate-500 hover:text-slate-800'
               }`}
             >
-              常规动态消耗
+              常规{t('dynamic_consumption', '动态消耗')}
             </button>
             <button
               type="button"
@@ -785,21 +807,26 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
               <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
                 采集主体 <span className="text-rose-500 ml-1 font-bold">*</span>
               </label>
-              <select
-                value={recordedCollectorId}
-                onChange={(e) => setRecordedCollectorId(e.target.value)}
-                disabled={costCategory === 'B' && valueConsumptionMode === 'B2'}
-                className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed cursor-pointer h-10 placeholder:text-[#94a3b8]"
-                required={!(costCategory === 'B' && valueConsumptionMode === 'B2')}
-              >
-                <option value="">选择采集主体...</option>
-                {collectorPool.map(u => (
-                  <option key={u.id} value={u.id}>
-                    {formatCollectorDisplay(u)}
-                  </option>
-                ))}
-              </select>
-              {selectedCollector && (
+              {isSysCollector ? (
+                <div className="flex items-center bg-slate-50 border border-slate-200 rounded-md px-3 py-2 h-10 text-[13px] font-bold text-slate-600">
+                  {costCategory === 'C' ? 'SYS_C (系统采集 · C类对冲)' : 'SYS_B2 (系统采集 · 产专运维消耗)'}
+                </div>
+              ) : (
+                <select
+                  value={recordedCollectorId}
+                  onChange={(e) => setRecordedCollectorId(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all cursor-pointer h-10 placeholder:text-[#94a3b8]"
+                  required={costCategory !== 'D'}
+                >
+                  <option value="">选择采集主体...</option>
+                  {collectorPool.map(u => (
+                    <option key={u.id} value={u.id}>
+                      {formatCollectorDisplay(u)}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {selectedCollector && !isSysCollector && (
                 <div className="text-[11px] text-slate-500 truncate mt-1">
                   <span className="font-bold text-slate-700">{formatCollectorDisplay(selectedCollector)}</span>
                   {collectorRoleInfo && collectorRoleInfo.incentiveImpact && (
@@ -897,10 +924,27 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
 
           {/* 消耗对冲阶梯 */}
           <div className="border-t border-slate-100 pt-5 space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                 消耗对冲阶梯
               </span>
+              {selectedResource && costCategory !== 'D' && (
+                <div className="flex items-center gap-2 text-xs font-mono bg-slate-50 border border-slate-200 px-2.5 py-1 rounded">
+                  <span className="text-slate-500 font-sans text-[11px]">预览折减权：</span>
+                  {selectedCategory === RefineCategory.Revenue ? (
+                    <span className="text-blue-700 font-bold">
+                      款轨 C权: {revenueWeight < 1 ? revenueWeight.toFixed(4) : '1.0000'} | B2权: —
+                    </span>
+                  ) : (
+                    <span className="text-emerald-700 font-bold">
+                      产轨综合权: {valueWeight < 1 ? valueWeight.toFixed(4) : '1.0000'}
+                      <span className="text-slate-400 text-[10px] font-normal ml-1">
+                        (C权: {hedgeInfo ? hedgeInfo.cWeightVal.toFixed(4) : '1.0000'} × B2权: {hedgeInfo ? hedgeInfo.b2Weight.toFixed(4) : '1.0000'})
+                      </span>
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
             
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -1153,7 +1197,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white text-[10px]">
               {paginatedConsumptionLogs.map(log => {
-                const { cWeightValue, b2WeightValue, revLimitStr, valLimitCStr, valLimitB2Str } = calculateConsumptionMirrorFields(log, resources, logs);
+                const { cWeightValue, b2WeightValue, revLimitStr, valLimitCStr, valLimitB2Str } = calculateConsumptionMirrorFields(log, resources, combinedAllLogs);
 
                 return (
                   <tr key={log.id} className="hover:bg-slate-50 transition-colors">

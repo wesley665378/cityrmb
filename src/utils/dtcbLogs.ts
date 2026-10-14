@@ -2,12 +2,12 @@ import { ValueCreationLog, RefineType } from '../types';
 
 /**
  * 判定单条流水是否属于动态消耗 (dtcb)
- * 口径：confirmationType==='手动确权' 且 (dynamicCost>0 或 type 为非有效工时对冲)。
- * D 类有 dynamicCost 的仍进 dtcb。禁止把落库改成「消耗确权」
+ * 口径：confirmationType 为「消耗确权」或「手动确权」且 (dynamicCost>0 或 type 为非有效工时对冲)。
+ * D 类有 dynamicCost 的仍进 dtcb。
  */
 export function shouldPersistLogToDtcb(log?: ValueCreationLog | null): boolean {
   if (!log) return false;
-  if (log.confirmationType !== '手动确权') return false;
+  if (log.confirmationType !== '消耗确权' && log.confirmationType !== '手动确权') return false;
   const cost = Number(log.dynamicCost) || 0;
   const isNonEffective =
     log.type === RefineType.NonEffectiveHours ||

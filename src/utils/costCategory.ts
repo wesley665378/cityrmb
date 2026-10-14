@@ -78,15 +78,15 @@ export function isCreationCategoryLog(log?: ValueCreationLog | null): boolean {
  */
 export function isDynamicCostLog(log?: ValueCreationLog | null): boolean {
   if (!log) return false;
-  // 1. confirmationType === '手动确权' → true
-  if (log.confirmationType === '手动确权') return true;
+  // 1. confirmationType ∈ {消耗确权, 手动确权} → true
+  if (log.confirmationType === '消耗确权' || log.confirmationType === '手动确权') return true;
   // 2. consumptionType 有值 → true
   if (Boolean((log as any).consumptionType)) return true;
-  // 3. 显式创造落库确权类型 → false
+  // 3. confirmationType ∈ {收款确权, 联动确权} → false
   if (log.confirmationType === '收款确权' || log.confirmationType === '联动确权') return false;
   // 4. category ∈ 收款/产值 且无 1/2 → false (兜底创造单)
   if (isCreationCategoryLog(log)) return false;
-  // 5. costCategory ∈ A|B|C|D → true
+  // 5. costCategory ∈ {A, B, C, D} → true
   if (log.costCategory && ['A', 'B', 'C', 'D'].includes(log.costCategory)) return true;
   return false;
 }
@@ -127,7 +127,9 @@ export function isDynamicCostConfirmedOrApproved(status: any): boolean {
     status === AuditStatus.Confirmed ||
     status === AuditStatus.Approved ||
     status === '已确权' ||
-    status === '入库'
+    status === '入库' ||
+    status === 'Confirmed' ||
+    status === 'Approved'
   );
 }
 

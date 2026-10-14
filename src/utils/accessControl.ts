@@ -47,6 +47,25 @@ export const isGlobalReader = (user: User | null | undefined): boolean => {
 };
 
 /**
+ * 可写「采集主体」页：采集主体名册 + 经营单元维护
+ * 包含系统管理员以及专职运维账号 npchr (id/userId === 'npchr')
+ */
+export function isCollectorsWriter(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (isSystemAdmin(user)) return true;
+  const id = String(user.id ?? '').trim().toLowerCase();
+  const login = String(user.userId ?? '').trim().toLowerCase();
+  return id === 'npchr' || login === 'npchr';
+}
+
+/**
+ * 采集主体名册只读/全盘读取范围
+ */
+export function isCollectorsRosterReader(user: User | null | undefined): boolean {
+  return isGlobalReader(user) || isCollectorsWriter(user);
+}
+
+/**
  * 侧栏水库、会务留样等全局管理读权限
  * 判定范围：Admin 或 npcxie
  */

@@ -11,6 +11,7 @@ import { getLocalMonthString } from '../src/utils/dateUtils';
 import { UI_LABELS } from '../src/constants/uiLabels';
 import { fetchEvaluationData, EvaluationExpertRow } from '../src/api/evaluation';
 import { toast } from 'sonner';
+import { useTerms } from '../src/hooks/useTerms';
 
 interface EvaluationProps {
   users?: User[];
@@ -36,6 +37,7 @@ const getTierBadgeClass = (tier?: string) => {
 };
 
 const Evaluation: React.FC<EvaluationProps> = ({ users = [], logs = [], auditLogs, resources = [], currentTime, onFilterMonthChange }) => {
+  const { t } = useTerms();
   const { maskMoney } = useCostPrivacy();
   const effectiveLogs = auditLogs || logs;
   const isLocalEmbedded = import.meta.env.VITE_USE_LOCAL_AUTH === 'true';
@@ -232,11 +234,11 @@ const Evaluation: React.FC<EvaluationProps> = ({ users = [], logs = [], auditLog
       {/* 顶部标题 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-300 pb-3 gap-4">
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 md:gap-4">
-          <h3 className="text-base md:text-lg font-bold text-slate-900 tracking-tight">全员价值贡献评价矩阵</h3>
+          <h3 className="text-base md:text-lg font-bold text-slate-900 tracking-tight">全员{t('value_evaluation', '价值评价')}贡献矩阵</h3>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-slate-500 font-mono font-bold uppercase tracking-wider">
-            综合价值评价与效率审计
+            综合{t('value_evaluation', '价值评价')}与效率审计
           </span>
         </div>
       </div>

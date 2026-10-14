@@ -104,7 +104,7 @@ export function buildResignNonEffectiveHoursLog(
     businessDate: resignDate,
     month: resignMonth,
     status: AuditStatus.Pending,
-    confirmationType: '手动确权',
+    confirmationType: '消耗确权',
     miningId: 'FXDC',
     timestamp: Date.now()
   };

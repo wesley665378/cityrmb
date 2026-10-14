@@ -32,7 +32,7 @@ import {
 import { getLocalDateString } from '../src/utils/dateUtils';
 import { formatMoney } from '../src/utils/formatMoney';
 import { EXCEL_IMPORT_MAX_BYTES, EXCEL_IMPORT_MAX_ROWS } from '../src/utils/excelIo';
-import { isSystemAdmin } from '../src/utils/accessControl';
+import { isSystemAdmin, isCollectorsWriter } from '../src/utils/accessControl';
 import { TERMINOLOGY } from '../src/constants/terminology';
 import { UI_LABELS } from '../src/constants/uiLabels';
 
@@ -51,6 +51,7 @@ interface PersonnelPoolProps {
   }) => Promise<void>;
   allLogs?: ValueCreationLog[];
   onAppendLog?: (log: ValueCreationLog) => void;
+  mode?: 'collectors' | 'accounts' | 'personnel';
 }
 
 const AUTO_ACCOUNT_CATEGORIES = ['经管员高款专', '经管员高产专', '经管员NPC', 'VP'];
@@ -65,8 +66,10 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
   onUpdateJydyUnits,
   persist,
   allLogs = [],
-  onAppendLog
+  onAppendLog,
+  mode = 'personnel'
 }) => {
+  const isCollectorsMode = mode === 'collectors';
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
   const isSyncing = useRef(false);
 
@@ -172,8 +175,9 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
   }, [users, activeCategory, searchQuery]);
 
   const handleCreateUser = async () => {
-    if (!isSystemAdmin(user)) {
-      return showAlert('权限不足：仅系统管理员有权执行人格注入。');
+    const canWrite = isCollectorsMode ? isCollectorsWriter(user) : isSystemAdmin(user);
+    if (!canWrite) {
+      return showAlert(isCollectorsMode ? '权限不足：无权维护采集主体。' : '权限不足：仅系统管理员有权执行账号管理操作。');
     }
 
     const isAutoCategory = AUTO_ACCOUNT_CATEGORIES.includes(newUserFormData.category || '');
@@ -279,8 +283,9 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isSystemAdmin(user)) {
-      return showAlert('权限不足：仅系统管理员有权执行保存操作。');
+    const canWrite = isCollectorsMode ? isCollectorsWriter(user) : isSystemAdmin(user);
+    if (!canWrite) {
+      return showAlert(isCollectorsMode ? '权限不足：无权维护采集主体。' : '权限不足：仅系统管理员有权执行保存操作。');
     }
     if (isSyncing.current) return;
 
@@ -394,8 +399,8 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
   };
 
   const addCenter = async () => {
-    if (!isSystemAdmin(user)) {
-      return showAlert('权限不足：仅系统管理员有权操作经营单元。');
+    if (!isCollectorsWriter(user)) {
+      return showAlert('权限不足：无权维护采集主体。');
     }
     if (isSyncing.current) return;
 
@@ -441,9 +446,9 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
   };
 
   const saveCenterRename = async (oldName: string) => {
-    if (!isSystemAdmin(user)) {
+    if (!isCollectorsWriter(user)) {
       setEditingCenter(null);
-      return showAlert('权限不足。');
+      return showAlert('权限不足：无权维护采集主体。');
     }
     if (isSyncing.current) return;
 
@@ -480,8 +485,8 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
   };
 
   const deleteCenter = (name: string) => {
-    if (!isSystemAdmin(user)) {
-      return showAlert('权限不足：仅系统管理员有权注销经营单元。');
+    if (!isCollectorsWriter(user)) {
+      return showAlert('权限不足：无权维护采集主体。');
     }
     showConfirm(`确定要注销单元 [${name}] 及其关联别名吗？`, async () => {
       if (isSyncing.current) return;
@@ -517,7 +522,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
   };
 
   const clearAllCenters = () => {
-    if (!isSystemAdmin(user)) return showAlert('权限不足：仅系统管理员有权操作。');
+    if (!isCollectorsWriter(user)) return showAlert('权限不足：无权维护采集主体。');
     return showAlert('注销失败：系统至少须保留一个经营单元，经营单元列表不可为空。');
   };
 
@@ -534,8 +539,8 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
   };
 
   const processExcelFile = (file: File) => {
-    if (!isSystemAdmin(user)) {
-      showAlert('权限不足：仅系统管理员有权执行批量导入。');
+    if (!isCollectorsWriter(user)) {
+      showAlert('权限不足：无权维护采集主体。');
       return;
     }
 
@@ -659,7 +664,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
         showConfirm(
           `导入将批量写入 ${newUsers.length} 条记录，请确认数据无误。（重复 ID 将被覆盖）`,
           async () => {
-            if (!isSystemAdmin(user)) return showAlert('权限不足：仅系统管理员有权执行批量导入。');
+            if (!isCollectorsWriter(user)) return showAlert('权限不足：无权维护采集主体。');
             if (isSyncing.current) return;
             isSyncing.current = true;
 
@@ -733,7 +738,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
     const message = `【复职操作确认】\n确定要将 [${userToToggle.name}] 恢复为在职状态吗？\n复职后其离职日期将被清空，系统将恢复其计薪资格。`;
     
     showConfirm(message, async () => {
-      if (!isSystemAdmin(user)) return showAlert('权限不足。');
+      if (!isCollectorsWriter(user)) return showAlert('权限不足：无权维护采集主体。');
       if (isSyncing.current) return;
       isSyncing.current = true;
 
@@ -757,6 +762,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
    */
   const handleResignSubmit = async () => {
     if (!resigningUser || isSyncing.current) return;
+    if (!isCollectorsWriter(user)) return showAlert('权限不足：无权维护采集主体。');
     
     const userToResign = resigningUser;
     isSyncing.current = true;
@@ -797,7 +803,11 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
   };
 
   const deleteUser = async (userId: string) => {
-    if (!isSystemAdmin(user)) return showAlert('权限不足。');
+    const canDelete = isCollectorsMode ? isCollectorsWriter(user) : isSystemAdmin(user);
+    if (!canDelete) return showAlert(isCollectorsMode ? '权限不足：无权维护采集主体。' : '权限不足：仅系统管理员有权操作。');
+    if (['admin', '1635', 'npcxie', 'npchr'].includes(userId.toLowerCase())) {
+      return showAlert('注销失败：内置保护账号不可注销。');
+    }
     showConfirm('确定要注销此账号吗？此操作不可逆！', async () => {
       if (isSyncing.current) return;
       isSyncing.current = true;
@@ -913,9 +923,12 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
   }, [users, rbacCategoryFilter, rbacSearch]);
 
   return (
+    <>
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-in slide-in-from-bottom-4">
-        <div className="lg:col-span-4 space-y-8">
-          <Card title="新增 采集主体" className={`p-6 ${UI_TOKENS.RADIUS_PANEL} border-2 border-blue-50 bg-blue-50/20 shadow-sm`}>
+        {isCollectorsMode ? (
+          <>
+            <div className="lg:col-span-4 space-y-8">
+              <Card title="新增 采集主体" className={`p-6 ${UI_TOKENS.RADIUS_PANEL} border-2 border-blue-50 bg-blue-50/20 shadow-sm`}>
             <div className="flex justify-end gap-2 mb-4">
               <button
                 onClick={() => {
@@ -1359,6 +1372,112 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
               </div>
             </div>
           </Card>
+        </div>
+      </>
+    ) : (
+      <>
+        <div className="lg:col-span-12 space-y-8 pb-12">
+          {showForm && (
+            <Card className={`p-8 ${UI_TOKENS.RADIUS_PANEL} border-2 border-blue-100 shadow-xl bg-white animate-in zoom-in-95 duration-200`}>
+              <form onSubmit={handleSubmit} className="space-y-6">
+                 <h4 className="font-black text-slate-800 text-sm">账号属性参数</h4>
+                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="space-y-1">
+                      <p className="text-[8px] font-bold text-slate-400 ml-1">登录账号</p>
+                      <input type="text" placeholder="loginid" value={formData.userId} onChange={e => setFormData({...formData, userId: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">工号 (必填)</p>
+                      <input type="text" placeholder="工号" value={formData.id} onChange={e => setFormData({...formData, id: e.target.value})} disabled={!!editingUserId} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">姓名 (必填)</p>
+                      <input type="text" placeholder="名称" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">
+                        {formData.category === 'VP' ? '指派经营单元 (VP 多选)' : '指派经营单元'}
+                      </p>
+                      {formData.category === 'VP' ? (
+                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-2 space-y-1">
+                          {effectiveBusinessUnits.map(unit => {
+                            const selectedCenters = parseCenterList(formData.center);
+                            const unitUpper = unit.trim().toUpperCase();
+                            const isChecked = selectedCenters.includes(unitUpper);
+                            return (
+                              <label key={unit} className="flex items-center space-x-2 text-xs font-bold text-slate-700 cursor-pointer hover:bg-slate-100 p-1 rounded">
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={e => {
+                                    let nextList = [...selectedCenters];
+                                    if (e.target.checked) {
+                                      if (!nextList.includes(unitUpper)) nextList.push(unitUpper);
+                                    } else {
+                                      nextList = nextList.filter(c => c !== unitUpper);
+                                    }
+                                    setFormData({ ...formData, center: nextList.join(', ') });
+                                  }}
+                                  className="rounded text-blue-600 focus:ring-blue-500"
+                                />
+                                <span>{unit}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <select value={formData.center} onChange={e => setFormData({...formData, center: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs">
+                          <option value="">未分类 / 全域</option>
+                          {effectiveBusinessUnits.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      )}
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">职级</p>
+                      <select value={formData.category} onChange={e => {
+                        const cat = e.target.value as any;
+                        const config = RANK_CONFIG[cat];
+                        setFormData({
+                          ...formData, 
+                          category: cat,
+                          salaryPackageType: (config?.salaryType as any) || formData.salaryPackageType
+                        });
+                      }} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs">
+                        {RANK_DICTIONARY.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">工资包类型</p>
+                      <select value={formData.salaryPackageType} onChange={e => setFormData({...formData, salaryPackageType: e.target.value as any})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs">
+                        {['收款工资包', '产值工资包', '经管员工资包', 'NPC工资包', 'VP工资包'].map(type => <option key={type} value={type}>{type}</option>)}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">工资包数值</p>
+                      <input type="number" placeholder="工资包数值" value={formData.salaryPackage === 0 ? '' : formData.salaryPackage} onChange={e => setFormData({...formData, salaryPackage: e.target.value === '' ? 0 : Number(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs" />
+                    </div>
+                    {editingUserId && formData.id === user.id && (
+                      <div className="space-y-1">
+                        <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">当前密码 (修改自己密码时必填)</p>
+                        <input type="password" placeholder="当前旧密码" value={formData.oldPassword || ''} onChange={e => setFormData({...formData, oldPassword: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs" />
+                      </div>
+                    )}
+                    <div className="space-y-1">
+                      <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">重置密码 (留空则不修改)</p>
+                      <input type="password" placeholder="新密码" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-[8px] font-bold text-slate-400 ml-1 uppercase">确认新密码</p>
+                      <input type="password" placeholder="确认密码" value={formData.confirmPassword} onChange={e => setFormData({...formData, confirmPassword: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-bold text-xs" />
+                    </div>
+                 </div>
+                 <div className="flex justify-end space-x-3">
+                   <button type="button" onClick={resetForm} className="px-6 py-3 font-bold text-slate-400 text-xs">取消</button>
+                   <button type="submit" className="bg-blue-600 text-white font-black px-10 py-3 rounded-xl text-xs">{editingUserId ? '保存变更' : '激活人格'}</button>
+                 </div>
+              </form>
+            </Card>
+          )}
 
           <Card 
             title="账号管理 (权限帐户概览)" 
@@ -1622,8 +1741,11 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
                )}
              </div>
            </Card>
-        </div>
-        <CityGuardianModal state={modalState} onClose={closeModal} />
+         </div>
+       </>
+     )}
+   </div>
+   <CityGuardianModal state={modalState} onClose={closeModal} />
         
         {/* 离职办理专供弹窗 */}
         {resigningUser && (
@@ -1696,7 +1818,7 @@ const PersonnelPool: React.FC<PersonnelPoolProps> = ({
             </div>
           </StandardModal>
         )}
-      </div>
+      </>
   );
 };
 

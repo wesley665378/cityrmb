@@ -9,13 +9,14 @@ import { Card, ProgressBar, Badge, ProjectStatusBadge } from '../src/components/
 import { XLSX, exportWorkbook, buildExcelFilename, EXCEL_IMPORT_MAX_BYTES, EXCEL_IMPORT_MAX_ROWS } from '../src/utils/excelIo';
 import { deriveProjectStatus } from '../src/utils/projectStatus';
 import { aggregateMiningQuadrantsFromLogs } from '../src/utils/purification';
-import { getInitialRevenueCapacity, getInitialValueCapacity, importNetAmount } from '../src/utils/miningCapacity';
+import { getInitialRevenueCapacity, getInitialValueCapacity, mineInitialNetAmount } from '../src/utils/miningCapacity';
 import { roundMoney, formatMoney } from '../src/utils/formatMoney';
 import { toast } from 'sonner';
 import { deleteMiningResource, toastApiError } from '../src/api';
 import { CityGuardianModal, useCityGuardianModal } from '../src/components/CityGuardianModal';
 import StandardModal from '../src/components/StandardModal';
 import { MiningResourceQueryView, normalizeMiningId } from '../src/components/MiningResourceQueryView';
+import { useTerms } from '../src/hooks/useTerms';
 
 interface FailedImportRow {
   lineNum: number;
@@ -57,6 +58,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
   units,
   systemConfig
 }) => {
+  const { t } = useTerms();
   const canExport = useMemo(() => canExportExcel(user, systemConfig), [user, systemConfig]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -279,8 +281,8 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
         seenInFileIds.add(id);
 
         const type = row['提炼类型'] || row['类型'] || RefineType.Enterprise;
-        const revCap = importNetAmount(rawRevCap, RefineCategory.Revenue);
-        const valCap = importNetAmount(rawValCap, RefineCategory.Value);
+        const revCap = mineInitialNetAmount(rawRevCap);
+        const valCap = mineInitialNetAmount(rawValCap);
         const cat = row['核算类别'] || '100%';
         const desc = row['摘要'] || row['备注'] || row['说明'] || undefined;
 
@@ -441,11 +443,17 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
     setEditingId(res.id);
     setNewMiningId(res.id);
     setSelectedType(res.types[0] || null);
-    // 统一步骤：UI 显示为原始基准，存储为提纯后的基准 (优先读 initial* 避免读错字段)
+    // 统一步骤：UI 显示为合同毛额基准，存库为 0.933 提纯后净值 (优先读 initial* 避免读错字段)
     const initialRev = getInitialRevenueCapacity(res);
     const initialVal = getInitialValueCapacity(res);
     setRevenueCapacity(roundMoney(initialRev / 0.933));
-    setValueCapacity(roundMoney(initialVal));
+    // 产值侧与收款侧对称：库存已是提纯净值，表单展示毛额时用 ÷0.933 反推；
+    // 兼容保护：若为未校准历史存量（产初仍为毛额，如 initialVal ≈ round(initialRev / 0.933)），则直接使用该毛额，避免二次反推
+    const isLegacyGrossVal = initialRev > 0 && initialVal > 0 && (
+      Math.abs(initialVal - Math.round(initialRev / 0.933)) <= 3 ||
+      (initialVal > initialRev && Math.abs(Math.round(initialVal * 0.933) - initialRev) <= 3)
+    );
+    setValueCapacity(isLegacyGrossVal ? roundMoney(initialVal) : roundMoney(initialVal / 0.933));
     setAssigneeRevenue(res.assignedToRevenue || res.assignedTo || '');
     setAssigneeValue(res.assignedToValue || res.assignedTo || '');
     setDescription(res.description || '');
@@ -521,9 +529,9 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
     const isOutsourced = selectedType === RefineType.Outsourced;
     let authorizedQuota = undefined;
     
-    // 统一步骤：使用统一 importNetAmount 函数转换为提纯后的基准进行存储 (收款×0.933，产值1:1)
-    const purifiedRevenueCapacity = importNetAmount(revenueCapacity, RefineCategory.Revenue);
-    const purifiedValueCapacity = importNetAmount(valueCapacity, RefineCategory.Value);
+    // 统一步骤（SSOT）：款初与产初双轨存库均为提纯后净值（一律使用 mineInitialNetAmount ×0.933 提纯后存库，严禁产值按 1:1 毛额存库）
+    const purifiedRevenueCapacity = mineInitialNetAmount(revenueCapacity);
+    const purifiedValueCapacity = mineInitialNetAmount(valueCapacity);
 
     const currentLogged = existingResource ? (existingResource.confirmedValue + existingResource.pendingValue + existingResource.minedValue) : 0;
 
@@ -687,7 +695,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
       {/* 权限受控：仅系统管理员（Admin）与 npcxie 显示查询入口 */}
       {canQuery && (
         <Card
-          title="矿山资源查询"
+          title={`${t('mining_resource', '矿山资源')}查询`}
           headerAction={<span className="text-[12px] text-slate-400 font-normal">npcxie · 全景穿透</span>}
           noPadding
         >
@@ -986,7 +994,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
                     onClick={() => document.getElementById('excel-import-input')?.click()}
                     disabled={importLoading || isPersistingImport || isImportConfirmPending || isImportResultModalOpen}
                     className="px-2.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-md text-[11px] font-black hover:bg-blue-100 transition-all flex items-center shadow-xs whitespace-nowrap h-10 shrink-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="批量导入矿山资源"
+                    title={`批量导入${t('mining_resource', '矿山资源')}`}
                   >
                     {importLoading ? '解析中...' : isPersistingImport ? '落库中...' : '📥 导入'}
                   </button>
@@ -1315,7 +1323,7 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
       <Card className={`${UI_TOKENS.RADIUS_PANEL} p-12`}>
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-8 mb-12">
            <div className="flex items-center space-x-4">
-             <h3 className="text-2xl font-black text-slate-900 tracking-tighter uppercase">矿山资源监控实时面板</h3>
+             <h3 className="text-2xl font-black text-slate-900 tracking-tighter uppercase">{t('mining_resource', '矿山资源')}监控实时面板</h3>
              <div className="flex items-center space-x-1 bg-slate-100 p-0.5 rounded-full border border-slate-200/80">
                <button 
                  onClick={() => setViewMode('card')}
@@ -1704,9 +1712,9 @@ const ResourceManagement: React.FC<ResourceManagementProps> = ({
               <RefreshCw className="w-6 h-6 animate-spin" />
             </div>
             <div className="space-y-1.5">
-              <h3 className="text-base font-bold text-slate-800 tracking-tight">正在导入矿山资源，请勿关闭页面…</h3>
+              <h3 className="text-base font-bold text-slate-800 tracking-tight">正在导入{t('mining_resource', '矿山资源')}，请勿关闭页面…</h3>
               <p className="text-xs text-slate-500 font-medium">
-                准备写入 <span className="font-mono font-bold text-blue-600">{importPersistCount}</span> 个矿山资源 {persistSeconds > 0 && `(${persistSeconds}s)`}
+                准备写入 <span className="font-mono font-bold text-blue-600">{importPersistCount}</span> 个{t('mining_resource', '矿山资源')} {persistSeconds > 0 && `(${persistSeconds}s)`}
               </p>
             </div>
             {/* Indeterminate progress bar */}

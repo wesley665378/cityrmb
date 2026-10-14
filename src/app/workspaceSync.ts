@@ -13,7 +13,7 @@ import {
 import { buildValueEfficiencySnapshots } from '../utils/valueEfficiencySnapshots';
 import { buildJzfpSnapshot } from '../utils/jzfpSnapshot';
 import { pickUserForWorkspaceSync } from '../utils/userSyncPayload';
-import { isSystemAdmin } from '../utils/accessControl';
+import { isSystemAdmin, isCollectorsWriter } from '../utils/accessControl';
 import { filterLogsForDtcbSync } from '../utils/dtcbLogs';
 import { filterLogsForJzczSync } from '../utils/jzczLogs';
 
@@ -71,6 +71,7 @@ export interface BuildAppSyncPayloadInput {
     acceptanceRecords: AcceptanceRecord[];
     systemConfig: SystemConfig;
     importBatchId: string;
+    jydyUnits: any[];
   }>;
 }
 
@@ -78,6 +79,7 @@ export interface BuildAppSyncPayloadInput {
 export function buildAppSyncPayload(input: BuildAppSyncPayloadInput): Record<string, unknown> {
   const { overrides, includePassword, currentUser } = input;
   const isAdmin = isSystemAdmin(currentUser);
+  const isCollectorsWriterUser = isCollectorsWriter(currentUser);
 
   const nextUsers = overrides?.users ?? input.managedUsers;
   const nextConfig = overrides?.systemConfig ?? input.systemConfig;
@@ -113,7 +115,7 @@ export function buildAppSyncPayload(input: BuildAppSyncPayloadInput): Record<str
 
   const isInitialUsersPlaceholder = 
     sanitizedUsers.length === 0 || 
-    (sanitizedUsers.length <= 3 && sanitizedUsers.every(u => u.id === 'admin' || u.id === '1635' || u.id === 'npcxie'));
+    (sanitizedUsers.length <= 4 && sanitizedUsers.every(u => ['admin', '1635', 'npcxie', 'npchr'].includes(u.id)));
 
   const payload: Record<string, any> = {
     ...buildSyncPayload({
@@ -137,10 +139,15 @@ export function buildAppSyncPayload(input: BuildAppSyncPayloadInput): Record<str
     exportEnabled: nextConfig?.exportEnabled,
     importBatchId: overrides?.importBatchId,
     import_batch_id: overrides?.importBatchId,
+    jydyUnits: overrides?.jydyUnits,
   };
 
-  // 关键修复：非 Admin 用户强制省略 users 字段，防止触发后端快照比对 403
-  if (!isAdmin || isInitialUsersPlaceholder || overrides) {
+  // 关键修复：非 Admin/CollectorsWriter 用户或未主动提交 overrides.users 时，强制省略 users 字段
+  if (isCollectorsWriterUser) {
+    if (!overrides?.users) {
+      delete payload.users;
+    }
+  } else if (!isAdmin || isInitialUsersPlaceholder || overrides) {
     if (!overrides?.users) {
       delete payload.users;
     }

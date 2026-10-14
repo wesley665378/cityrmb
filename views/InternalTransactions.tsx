@@ -3,6 +3,7 @@ import { UI_TOKENS } from '../src/constants/uiTokens';
 import React, { useState, useMemo, useEffect } from 'react';
 import { User, Role, MiningResource, InternalTransaction, TransactionType, TransactionStatus, CircuitBreaker, TransactionFailure, RefineCategory, RefineType, AuditStatus, ValueCreationLog, SystemConfig } from '../types';
 import { parseCenterList, centerMatch, isResourceAssignedToCenter } from '../src/utils/centerScope';
+import { isDynamicCostLog } from '../src/utils/costCategory';
 import { ProgressBar } from '../src/components/UI';
 import { useDedupe } from '../src/hooks/useDedupe';
 import { XLSX, exportWorkbook } from '../src/utils/excelIo';
@@ -330,7 +331,7 @@ const InternalTransactions: React.FC<InternalTransactionsProps> = ({
   }, [resources, miningId]);
 
   const valueLogs = useMemo(() => {
-    return jzczLogs ?? logs.filter(l => l.confirmationType !== '手动确权');
+    return jzczLogs ?? logs.filter(l => l.confirmationType !== '消耗确权' && l.confirmationType !== '手动确权' && !isDynamicCostLog(l));
   }, [jzczLogs, logs]);
 
   const selectedResourceQuadrants = useMemo(() => {
