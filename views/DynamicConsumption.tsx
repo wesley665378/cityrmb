@@ -250,6 +250,8 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<RefineCategory>(RefineCategory.Revenue);
   const [costCategory, setCostCategory] = useState<'A' | 'B' | 'C' | 'D'>('A');
   const [valueConsumptionMode, setValueConsumptionMode] = useState<'B1' | 'B2'>('B1');
+  const [payeeType, setPayeeType] = useState<'EMPLOYEE' | 'SUPPLIER'>('EMPLOYEE');
+  const [payeeName, setPayeeName] = useState<string>('');
   const [dynamicCost, setDynamicCost] = useState<number>(0);
   const [businessDate, setBusinessDate] = useState<string>(() => getLocalDateString());
   const [businessMonth, setBusinessMonth] = useState<string>(() => getLocalMonthString());
@@ -414,11 +416,20 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
       return;
     }
 
+    const isPayeeSectionActive = isB2 || isD;
+    if (isPayeeSectionActive && payeeType === 'SUPPLIER' && !payeeName.trim()) {
+      showAlert('请填写“供应商名称”。');
+      return;
+    }
+
     const categoryLabel = costCategory === 'B' && valueConsumptionMode === 'B2' ? 'B2' : costCategory;
     const mineNotice = isD ? '【归属】经营单元公摊（无项目列支）' : `【矿山】${selectedMiningId}`;
+    const effectivePayeeType = isPayeeSectionActive && payeeType === 'SUPPLIER' ? 'SUPPLIER' : 'EMPLOYEE';
+    const effectivePayeeName = effectivePayeeType === 'SUPPLIER' ? payeeName.trim() : '';
+    const payeeNotice = effectivePayeeType === 'SUPPLIER' ? `\n【支付对象】供应商直付 (${effectivePayeeName})` : '';
 
     showConfirm(
-      `确定提报动态消耗申请？\n\n【类别】${categoryLabel}类消耗\n${mineNotice}\n【数值】${Math.round(dynamicCost).toLocaleString()}\n【归属月份】${businessMonth}`,
+      `确定提报动态消耗申请？\n\n【类别】${categoryLabel}类消耗\n${mineNotice}${payeeNotice}\n【数值】${Math.round(dynamicCost).toLocaleString()}\n【归属月份】${businessMonth}`,
       async () => {
         const status = AuditStatus.Pending;
         const confirmationType = '消耗确权';
@@ -436,6 +447,8 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
           type: selectedType as RefineType,
           costCategory: selectedType === RefineType.NonEffectiveHours ? undefined : costCategory,
           valueConsumptionMode: selectedCategory === RefineCategory.Value && costCategory === 'B' ? valueConsumptionMode : undefined,
+          payeeType: effectivePayeeType,
+          payeeName: effectivePayeeName,
           amount: 0,
           rawAmount: 0,
           dynamicCost: dynamicCost,
@@ -449,6 +462,8 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
 
         onLogSubmit(newLog);
         setDynamicCost(0);
+        setPayeeType('EMPLOYEE');
+        setPayeeName('');
         
         const nextDtcb = [...dtcbLogsToUse, newLog];
         const payload = isGlobalReader(user) ? nextDtcb : [newLog];
@@ -555,6 +570,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
         '提报时间': formatSubmissionTime(log.timestamp),
         '矿山编号': log.miningId,
         '采集主体': formatCollectorDisplay(log.recordedCollectorId, users),
+        '支付对象': log.payeeType === 'SUPPLIER' ? `供应商直付 (${log.payeeName || '-'})` : '员工代付',
         '非效对冲': (log.type === RefineType.NonEffectiveHours || isNonEffectiveHoursEffective(log)) ? Math.round(getNonEffectiveHoursDeduction(log)) : 0,
         'A': log.costCategory === 'A' ? Math.round(log.dynamicCost) : 0,
         'C': log.costCategory === 'C' ? Math.round(log.dynamicCost) : 0,
@@ -953,6 +969,8 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                 onClick={() => {
                   setCostCategory('A');
                   setSelectedCategory(RefineCategory.Revenue);
+                  setPayeeType('EMPLOYEE');
+                  setPayeeName('');
                 }}
                 className={`p-3 rounded-sm cursor-pointer transition-all flex flex-col items-center justify-between text-center space-y-1.5 border ${
                   costCategory === 'A'
@@ -977,6 +995,8 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                   setCostCategory('B');
                   setValueConsumptionMode('B1');
                   setSelectedCategory(RefineCategory.Value);
+                  setPayeeType('EMPLOYEE');
+                  setPayeeName('');
                 }}
                 className={`p-3 rounded-sm cursor-pointer transition-all flex flex-col items-center justify-between text-center space-y-1.5 border ${
                   costCategory === 'B' && valueConsumptionMode === 'B1'
@@ -1001,6 +1021,8 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                   setCostCategory('B');
                   setValueConsumptionMode('B2');
                   setSelectedCategory(RefineCategory.Value);
+                  setPayeeType('EMPLOYEE');
+                  setPayeeName('');
                 }}
                 className={`p-3 rounded-sm cursor-pointer transition-all flex flex-col items-center justify-between text-center space-y-1.5 border ${
                   costCategory === 'B' && valueConsumptionMode === 'B2'
@@ -1027,6 +1049,8 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                     return; // 禁用
                   }
                   setCostCategory('C');
+                  setPayeeType('EMPLOYEE');
+                  setPayeeName('');
                 }}
                 className={`p-3 rounded-sm cursor-pointer transition-all flex flex-col items-center justify-between text-center space-y-1.5 border ${
                   costCategory === 'C'
@@ -1051,6 +1075,8 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
               <div
                 onClick={() => {
                   setCostCategory('D');
+                  setPayeeType('EMPLOYEE');
+                  setPayeeName('');
                 }}
                 className={`p-3 rounded-sm cursor-pointer transition-all flex flex-col items-center justify-between text-center space-y-1.5 border ${
                   costCategory === 'D'
@@ -1070,6 +1096,66 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                 </div>
               </div>
             </div>
+
+            {/* 支付对象 (仅在 B2 和 D 分类下平滑展开) */}
+            {((costCategory === 'B' && valueConsumptionMode === 'B2') || costCategory === 'D') && (
+              <div className="border-t border-slate-100 pt-4 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
+                    支付对象 <span className="text-rose-500 ml-1 font-bold">*</span>
+                  </label>
+                  <span className="text-[11px] text-slate-400">
+                    {payeeType === 'EMPLOYEE' ? '默认关联采集主体' : '须填写供应商名称'}
+                  </span>
+                </div>
+
+                {/* 胶囊单选按钮 */}
+                <div className="inline-flex items-center p-1 bg-slate-100 rounded-md border border-slate-200/80 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPayeeType('EMPLOYEE');
+                      setPayeeName('');
+                    }}
+                    className={`px-3 py-1.5 text-xs font-bold rounded transition-all cursor-pointer ${
+                      payeeType === 'EMPLOYEE'
+                        ? 'bg-white text-blue-600 shadow-xs border border-slate-200/50'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    员工代付
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPayeeType('SUPPLIER')}
+                    className={`px-3 py-1.5 text-xs font-bold rounded transition-all cursor-pointer ${
+                      payeeType === 'SUPPLIER'
+                        ? 'bg-white text-blue-600 shadow-xs border border-slate-200/50'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    供应商直付
+                  </button>
+                </div>
+
+                {/* 选中【供应商直付】平滑展开文本输入框 */}
+                {payeeType === 'SUPPLIER' && (
+                  <div className="space-y-1.5 pt-1 animate-in fade-in slide-in-from-top-1 duration-200">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
+                      供应商名称 <span className="text-rose-500 ml-1 font-bold">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={payeeName}
+                      onChange={(e) => setPayeeName(e.target.value)}
+                      placeholder="请输入完整的供应商名称..."
+                      className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all h-10 placeholder:text-slate-400 placeholder:font-normal"
+                      required={payeeType === 'SUPPLIER'}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* 申报积分与提交按钮区 */}
@@ -1219,6 +1305,11 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                     </td>
                     <td className="px-3 py-3 border-r border-slate-100 whitespace-nowrap min-w-[130px]">
                       <div className="font-bold text-slate-700 whitespace-nowrap">{formatCollectorDisplay(log.recordedCollectorId, users)}</div>
+                      {log.payeeType === 'SUPPLIER' && log.payeeName && (
+                        <div className="text-[9px] font-bold text-blue-600 truncate max-w-[150px]" title={`供应商/收款企业: ${log.payeeName}`}>
+                          直付: {log.payeeName}
+                        </div>
+                      )}
                       <div className="text-[9px] text-slate-400 font-normal whitespace-nowrap">{log.type}</div>
                       {(() => {
                         const collector = users.find(u => u.id === log.recordedCollectorId);

@@ -28,3 +28,35 @@ export const putAuditLog = async (
 
 export const auditLog = putAuditLog;
 
+export interface BankStatementVerificationResult {
+  success: boolean;
+  summary: {
+    total: number;
+    matchedCount: number;
+    conflictCount: number;
+    exceptionCount: number;
+  };
+  matched: Array<{
+    statementItem: { id: string; payeeName: string; amount: number; transactionTime: string; transactionId: string };
+    matchedLog: ValueCreationLog;
+  }>;
+  conflicts: Array<{
+    statementItem: { id: string; payeeName: string; amount: number; transactionTime: string; transactionId: string };
+    candidates: ValueCreationLog[];
+  }>;
+  exceptions: Array<{
+    statementItem: { id: string; payeeName: string; amount: number; transactionTime: string; transactionId: string };
+    reason: string;
+  }>;
+}
+
+export const verifyBankStatement = async (fileData?: string, filename?: string): Promise<BankStatementVerificationResult> => {
+  const raw = await apiClient.post<any>('/api/audit/verify-statement', { fileData, filename });
+  return unwrapApiEnvelope<BankStatementVerificationResult>(raw);
+};
+
+export const confirmStatementConflicts = async (confirmations: Array<{ logId: string; transactionId?: string }>): Promise<{ success: boolean; updatedCount: number }> => {
+  const raw = await apiClient.post<any>('/api/audit/confirm-conflicts', { confirmations });
+  return unwrapApiEnvelope<any>(raw);
+};
+

@@ -67,6 +67,7 @@ import { ChevronLeft, ChevronRight, CheckCheck } from 'lucide-react';
 import { fetchWorkspaceData } from "@/api/workspace";
 import { toast } from "sonner";
 import { CityGuardianModal, useCityGuardianModal } from "@/components/CityGuardianModal";
+import { StatementVerificationModal } from '../src/components/StatementVerificationModal';
 import { useTerms } from "@/hooks/useTerms";
 
 interface AuditingProps {
@@ -105,6 +106,7 @@ const Auditing: React.FC<AuditingProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedLogIds, setSelectedLogIds] = useState<Set<string>>(new Set());
   const [isBatchConfirming, setIsBatchConfirming] = useState(false);
+  const [isStatementModalOpen, setIsStatementModalOpen] = useState(false);
   const PAGE_SIZE = 50;
 
   useEffect(() => {
@@ -735,6 +737,11 @@ const Auditing: React.FC<AuditingProps> = ({
         }}
       />
       <CityGuardianModal state={modalState} onClose={closeModal} />
+      <StatementVerificationModal 
+        isOpen={isStatementModalOpen}
+        onClose={() => setIsStatementModalOpen(false)}
+        onSuccessRefresh={handleRefresh}
+      />
       {/* 单层统一工具条（合并确权规则与标题导航） */}
       <div className="bg-white p-3 md:p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="flex items-center space-x-3">
@@ -975,18 +982,13 @@ const Auditing: React.FC<AuditingProps> = ({
                 </svg>
                 导出
               </button>
-              <div className="hidden sm:flex items-center space-x-2">
-                <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                <span className="text-[8px] font-black text-slate-400 uppercase">
-                  产出申请
-                </span>
-              </div>
-              <div className="hidden sm:flex items-center space-x-2">
-                <span className="w-2 h-2 rounded-full bg-rose-500"></span>
-                <span className="text-[8px] font-black text-slate-400 uppercase">
-                  消耗申报
-                </span>
-              </div>
+              <button
+                onClick={() => setIsStatementModalOpen(true)}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-sm transition-all flex items-center space-x-1.5 active:scale-95 cursor-pointer"
+                title="上传付款流水 Excel (.xls/.xlsx) 进行自动化校验与冲突匹配"
+              >
+                <span>🏦 导入流水校验</span>
+              </button>
             </div>
           }
         >
