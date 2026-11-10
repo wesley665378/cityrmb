@@ -982,13 +982,15 @@ const Auditing: React.FC<AuditingProps> = ({
                 </svg>
                 导出
               </button>
-              <button
-                onClick={() => setIsStatementModalOpen(true)}
-                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-sm transition-all flex items-center space-x-1.5 active:scale-95 cursor-pointer"
-                title="上传付款流水 Excel (.xls/.xlsx) 进行自动化校验与冲突匹配"
-              >
-                <span>🏦 导入流水校验</span>
-              </button>
+              {activeTab === 'consumption' && (isNpcxie || isAdmin || user.id === 'npcxie' || user.category === '系统管理员' || user.role === Role.Admin) && (
+                <button
+                  onClick={() => setIsStatementModalOpen(true)}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-sm transition-all flex items-center space-x-1.5 active:scale-95 cursor-pointer"
+                  title="上传付款流水 Excel (.xls/.xlsx) 进行自动化校验与冲突匹配"
+                >
+                  <span>🏦 导入流水校验</span>
+                </button>
+              )}
             </div>
           }
         >
@@ -1564,6 +1566,11 @@ const Auditing: React.FC<AuditingProps> = ({
             );
           })()}
         </Card>
+        <StatementVerificationModal
+          isOpen={isStatementModalOpen}
+          onClose={() => setIsStatementModalOpen(false)}
+          onSuccessRefresh={handleRefresh}
+        />
       </div>
     );
   };

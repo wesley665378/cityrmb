@@ -1361,7 +1361,41 @@ function validateLogQuotasServer(
     }
   });
 
-  // 2b. Verify Bank Statement Endpoint (招商银行流水校验)
+  // 2a-1. GET Download Template Endpoint (下载标准模板)
+  app.get("/api/finance/download-template", (req, res) => {
+    try {
+      const templateData = [
+        {
+          '收(付)方名称': '严琼',
+          '借方金额': 319.21,
+          '摘要': '转账-严琼交通费报销',
+          '流水号': 'BNK20261024001',
+          '业务摘要': '严琼交通费'
+        }
+      ];
+      const worksheet = XLSX.utils.json_to_sheet(templateData, {
+        header: ['收(付)方名称', '借方金额', '摘要', '流水号', '业务摘要']
+      });
+      worksheet['!cols'] = [
+        { wch: 18 },
+        { wch: 14 },
+        { wch: 28 },
+        { wch: 22 },
+        { wch: 22 }
+      ];
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "流水校验");
+      const buf = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', 'attachment; filename*=UTF-8\'\'' + encodeURIComponent('流水校验标准模板.xlsx'));
+      res.send(buf);
+    } catch (err: any) {
+      res.status(500).json({ error: '生成模板文件失败' });
+    }
+  });
+
+  // 2b. Verify Bank Statement Endpoint (流水校验)
   app.post("/api/audit/verify-statement", async (req, res) => {
     try {
       const { fileData } = req.body;
@@ -1379,9 +1413,10 @@ function validateLogQuotasServer(
         dbLogs = MOCK_LOGS_DB;
       }
 
-      // Filter all pending logs (状态=待确权)
+      // Filter all pending logs (状态=待确权) - 隔离 needBankMatch = false 的借支平账单
       const pendingLogs = (dbLogs || []).filter(
-        l => l && !l.deleted && (l.status === '待确权' || l.status === 'Pending' || l.status === 'Pending')
+        l => l && !l.deleted && (l.status === '待确权' || l.status === 'Pending') &&
+        (l.needBankMatch === true || (l.needBankMatch !== false && l.payeeType !== 'PETTY_SETTLE'))
       );
 
       let statementItems: Array<{ id: string; payeeName: string; amount: number; transactionTime: string; transactionId: string }> = [];
@@ -1392,6 +1427,19 @@ function validateLogQuotasServer(
           const workbook = XLSX.read(buffer, { type: 'buffer' });
           const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
           const rawRows: any[] = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
+
+          if (rawRows.length > 0) {
+            const sampleRowKeys = Object.keys(rawRows[0]).map(k => String(k).trim().replace(/\s+/g, ''));
+            const hasPayeeHeader = sampleRowKeys.some(k => k.includes('收(付)方名称') || k.includes('收付方名称') || k.includes('对方户名') || k.includes('户名') || k.includes('名称') || k.includes('对方') || k.includes('收款') || k.includes('付款'));
+            const hasAmountHeader = sampleRowKeys.some(k => k.includes('借方金额') || k.includes('金额') || k.includes('发生额') || k.includes('支出') || k.includes('收入'));
+            const hasIdHeader = sampleRowKeys.some(k => k.includes('流水号') || k.includes('凭证号') || k.includes('单号') || k.includes('报文号'));
+
+            if (!hasPayeeHeader || !hasAmountHeader || !hasIdHeader) {
+              return res.status(400).json({ error: '模板格式错误，请下载最新的标准模板重试！' });
+            }
+          } else {
+            return res.status(400).json({ error: '模板格式错误，请下载最新的标准模板重试！' });
+          }
 
           let rowIdx = 0;
           for (const r of rawRows) {
@@ -1497,18 +1545,7 @@ function validateLogQuotasServer(
 
         if (candidates.length === 1) {
           const matchedLog = candidates[0];
-          matchedLog.status = '已确权';
-          matchedLog.confirmedAt = Date.now();
-          matchedLog.bankTransactionId = item.transactionId;
-
-          if (db) {
-            try {
-              await db.execute('UPDATE logs SET status = ?, confirmedAt = ? WHERE id = ?', ['已确权', matchedLog.confirmedAt, matchedLog.id]);
-            } catch (err) {
-              console.warn("DB update in verify-statement failed:", err);
-            }
-          }
-
+          // verify-statement does NOT modify status or write to DB
           matchedResults.push({
             statementItem: item,
             matchedLog: matchedLog

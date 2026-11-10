@@ -284,6 +284,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
   const [selectedCollectors, setSelectedCollectors] = useState<{ id: string, amount: number, rawAmount?: number }[]>([]);
   const [selectedMiningId, setSelectedMiningId] = useState('');
   const [isMiningDropdownOpen, setIsMiningDropdownOpen] = useState(false);
+  const [isMineDetailOpen, setIsMineDetailOpen] = useState(false);
   const [miningSearchTerm, setMiningSearchTerm] = useState('');
   const { modalState, showAlert, showConfirm, closeModal } = useCityGuardianModal();
   const { isLocked } = useDedupe(500);
@@ -897,31 +898,35 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
     }
     
     const totalAmount = selectedCollectors.reduce((sum, c) => sum + c.amount, 0);
-    if (totalAmount <= 0) return showAlert('总积分必须大于0');
+    const totalRawInput = selectedCollectors.reduce(
+      (sum, c) => sum + roundMoney(c.rawAmount !== undefined && c.rawAmount !== null ? Number(c.rawAmount) : Number(c.amount || 0)),
+      0
+    );
+    if (totalRawInput <= 0 || totalAmount <= 0) return showAlert('总积分必须大于0');
 
     if (selectedResource) {
-      // 1. 物理上限校验
-      const purifiedTotalAmount = totalAmount;
-      if (purifiedTotalAmount > maxAllowed + 0.01) { // 允许 0.01 误差
-        const initialCap = selectedCategory === RefineCategory.Value 
-          ? Math.round(getInitialValueCapacity(selectedResource))
-          : Math.round(getInitialRevenueCapacity(selectedResource));
-        const confirmed = selectedCategory === RefineCategory.Value
-          ? Math.round(rawInputOccupancy.value.confirmed)
-          : Math.round(rawInputOccupancy.revenue.confirmed);
-        const pending = selectedCategory === RefineCategory.Value
-          ? Math.round(rawInputOccupancy.value.pending)
-          : Math.round(rawInputOccupancy.revenue.pending);
-        const mined = selectedCategory === RefineCategory.Value
-          ? Math.round(rawInputOccupancy.value.mined)
-          : Math.round(rawInputOccupancy.revenue.mined);
+      // 1. 最高可提炼量门禁校验（仅当 本次各采集主体输入合计 > 最高可提炼量 时拦截，禁止用注入合计比较）
+      if (totalRawInput > maxAllowed) {
+        const isVal = selectedCategory === RefineCategory.Value;
+        const initialCap = isVal
+          ? rawInputOccupancy.initialValue
+          : rawInputOccupancy.initialRevenue;
+        const confirmed = isVal
+          ? rawInputOccupancy.value.confirmed
+          : rawInputOccupancy.revenue.confirmed;
+        const pending = isVal
+          ? rawInputOccupancy.value.pending
+          : rawInputOccupancy.revenue.pending;
+        const mined = isVal
+          ? rawInputOccupancy.value.mined
+          : rawInputOccupancy.revenue.mined;
         const maxVal = Math.round(maxAllowed);
+        const inputLabel = isVal ? '输入产值' : '输入收款';
+        const initLabel = isVal ? '产初' : '款初';
 
-        const calcFormula = selectedCategory === RefineCategory.Value
-          ? `产初(${initialCap}) - 已确(${confirmed}) - 待确(${pending}) - 入库(${mined}) = 最高可提炼量(${maxVal})`
-          : `款初(${initialCap}) - 已确(${confirmed}) - 待确(${pending}) - 入库(${mined}) = 最高可提炼量(${maxVal})`;
+        const calcFormula = `${initLabel}(${initialCap}) - 已确(输入)(${confirmed}) - 待确(输入)(${pending}) - 入库(输入)(${mined}) = ${maxVal}`;
 
-        showAlert(`超额限制：本次注入提纯后积分（${Math.round(purifiedTotalAmount)}）超过了当前最高可提炼量（${maxVal}）。\n\n核算口径：\n${calcFormula}`);
+        showAlert(`超额限制：本次${inputLabel}（${totalRawInput}）超过最高可提炼量（${maxVal}）。\n核算口径：${calcFormula}`);
         return;
       }
       
@@ -978,7 +983,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
           showAlert(`该项目处于${status}状态，无法继续提报产值。`);
           return;
         }
-        if (selectedResource.valueDepleted) {
+        if (rawInputOccupancy.maxAllowedValue <= 0) {
           showAlert('该矿山产出已满，无法继续提报。');
           return;
         }
@@ -1967,27 +1972,10 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
     <div className="w-full space-y-4 md:space-y-6 lg:space-y-8 animate-in fade-in duration-500 pb-6">
       <AuditModal isOpen={isAuditOpen} onClose={() => setIsAuditOpen(false)} onConfirm={confirmSubmit} data={auditData} />
       <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-200 pb-3 gap-4">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-4 md:gap-6">
-          <h3 className="text-base md:text-lg font-bold text-slate-800 tracking-tighter uppercase">价值创造申报</h3>
-          {selectedResource && (
-            <div className="flex items-center space-x-2 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100 animate-in fade-in slide-in-from-left-2 transition-all">
-               <span className="relative flex h-2 w-2">
-                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-               </span>
-               <span className="text-[9px] font-black text-emerald-700 uppercase tracking-tighter">
-                 {dataIntegrityStatus.msg}: 
-                 {selectedCategory === RefineCategory.Revenue ? (
-                   <span className="ml-1 font-mono">C权({dataIntegrityStatus.stats?.cWeight != null ? dataIntegrityStatus.stats.cWeight.toFixed(4) : '1.0000'})</span>
-                 ) : (
-                   <span className="ml-1 font-mono">C权({dataIntegrityStatus.stats?.cWeight != null ? dataIntegrityStatus.stats.cWeight.toFixed(4) : '1.0000'}) | B2权({dataIntegrityStatus.stats?.b2Weight != null ? dataIntegrityStatus.stats.b2Weight.toFixed(4) : '1.0000'})</span>
-                 )}
-               </span>
-               <span className="ml-2 text-[8px] font-bold text-emerald-500 bg-white px-1.5 rounded border border-emerald-100">单一数据源实时校验已开启</span>
-            </div>
-          )}
+        <div className="flex items-center gap-3">
+          <h3 className="text-base md:text-lg font-bold text-slate-800">价值创造申报</h3>
         </div>
-        <span className="text-[9px] md:text-[10px] text-slate-400 font-bold uppercase tracking-widest self-start sm:self-center">终端：{user.name}</span>
+        <span className="text-xs text-slate-500 font-medium self-start sm:self-center">终端：{user.name}</span>
       </div>
 
       {/* 申报区 */}
@@ -1996,7 +1984,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
             {/* 第 1 行 - 左：采集主体 */}
             <div className="flex flex-col space-y-1.5 sm:col-span-1 lg:col-span-2">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
+              <label className="text-xs font-medium text-slate-600 flex items-center h-4">
                 {t('collector', '采集主体')} <span className="text-rose-500 ml-1 font-bold">*</span>
               </label>
               <select 
@@ -2073,16 +2061,16 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
 
             {/* 第 1 行 - 右：提报类型 (主体自动锁定收款/产值，锁定态显示“已根据主体自动匹配”) */}
             <div className="flex flex-col space-y-1.5 sm:col-span-1 lg:col-span-2">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between h-4">
+              <label className="text-xs font-medium text-slate-600 flex items-center justify-between h-4">
                 <span>提报类型 <span className="text-rose-500 ml-1 font-bold">*</span></span>
                 {isCategoryLocked && (
-                  <span className="text-[9px] text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
-                    已根据主体自动匹配
+                  <span className="text-[11px] text-slate-400 font-normal">
+                    已按主体自动匹配
                   </span>
                 )}
               </label>
               {isCategoryLocked ? (
-                <div className="w-full bg-slate-50 border border-slate-200 rounded-md px-3 py-2 text-[13px] font-bold text-slate-500 h-10 flex items-center shadow-inner">
+                <div className="w-full bg-slate-50 border border-slate-200 rounded-md px-3 py-2 text-[13px] font-bold text-slate-600 h-10 flex items-center">
                   {selectedCategory === RefineCategory.Revenue ? "收款类" : "产值类"}
                 </div>
               ) : (
@@ -2115,7 +2103,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
 
             {/* 第 2 行：矿山编号 (整行 col-span-1 sm:col-span-2 lg:col-span-4) */}
             <div className="flex flex-col space-y-1.5 col-span-1 sm:col-span-2 lg:col-span-4 relative">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
+              <label className="text-xs font-medium text-slate-600 flex items-center h-4">
                 矿山编号 <span className="text-rose-500 ml-1 font-bold">*</span>
               </label>
               <div className="flex flex-col space-y-2 relative mining-dropdown-container">
@@ -2163,10 +2151,10 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                     ) : (
                       availableResources.map(r => {
                         const { status } = deriveProjectStatus(r);
-                        const uq = aggregateMiningQuadrantsFromLogs(logs, resources, r.id, user.center, managedUsers);
-                        const unitRemaining = selectedCategory === RefineCategory.Value ? uq.value.unconfirmed : uq.revenue.unconfirmed;
+                        const rOcc = calculateRawInputMineralOccupancy(r, logs);
+                        const unitRemaining = selectedCategory === RefineCategory.Value ? rOcc.maxAllowedValue : rOcc.maxAllowedRevenue;
                         const typeTag = selectedCategory === RefineCategory.Value ? '产值' : '收款';
-                        const isFull = selectedCategory === RefineCategory.Value && unitRemaining <= 0 && status === ProjectStatus.InProgress;
+                        const isFull = unitRemaining <= 0 && status === ProjectStatus.InProgress;
                         const remark = (r.description || (r as any).remark || (r as any).remarks || '').trim();
 
                         return (
@@ -2209,49 +2197,90 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                 )}
 
                 {!selectedMiningId && (
-                  <p className="text-[11px] text-amber-600 font-medium bg-amber-50/50 border border-amber-200/60 rounded px-2.5 py-1 mt-1 flex items-center">
-                    <span className="mr-1 text-[12px]">ℹ️</span>
+                  <p className="text-xs text-slate-400 mt-1">
                     {availableResources.length === 0 
                       ? "当前主体暂无可用矿山，请先确认主体或经营单元。" 
                       : "请先选择对应的矿山编号以完成价值申报。"}
                   </p>
                 )}
-                {selectedMiningId && (
-                  <div className="w-full bg-slate-50 border border-slate-200 p-3 rounded-md shadow-sm space-y-2">
-                    <div className="flex justify-between items-center text-[9px] font-bold">
-                       <span className="text-slate-500">款初: <span className="text-indigo-600">{formatMoney(getInitialRevenueCapacity(selectedResource))}</span> | 款当: <span className="text-amber-600">{formatMoney(getCurrentRevenueCapacity(selectedResource, hedgeLogs))}</span></span>
-                       <span className="text-slate-500">产初: <span className="text-indigo-600">{formatMoney(getInitialValueCapacity(selectedResource))}</span> | 产当: <span className="text-emerald-600">{formatMoney(getCurrentValueCapacity(selectedResource, hedgeLogs))}</span></span>
-                    </div>
-                    {(() => {
-                      const hedgeInfo = calculateHedgeCapacitiesAndWeights(selectedResource, hedgeLogs);
-                      if (hedgeInfo.C > 0 || hedgeInfo.B2 > 0) {
-                        return (
-                          <div className="flex justify-between items-center text-[9px] font-bold text-slate-500 border-t border-slate-200/60 pt-1.5">
-                            <span>已确权消耗: <span className="text-amber-600">ΣC: {formatMoney(hedgeInfo.C)}</span> | <span className="text-emerald-600">ΣB2: {formatMoney(hedgeInfo.B2)}</span></span>
-                            <span>实时对冲权: <span className="text-indigo-600">C权: {hedgeInfo.cWeightRev.toFixed(4)}</span> | <span className="text-emerald-600">B2权: {hedgeInfo.b2Weight.toFixed(4)}</span></span>
+                {selectedMiningId && selectedResource && (() => {
+                  const isVal = selectedCategory === RefineCategory.Value;
+                  const currentInitial = isVal ? rawInputOccupancy.initialValue : rawInputOccupancy.initialRevenue;
+                  const currentOccupied = isVal ? rawInputOccupancy.value.totalOccupancy : rawInputOccupancy.revenue.totalOccupancy;
+                  const currentRemaining = isVal ? rawInputOccupancy.maxAllowedValue : rawInputOccupancy.maxAllowedRevenue;
+                  const initLabel = isVal ? '产初' : '款初';
+                  const hedgeInfo = calculateHedgeCapacitiesAndWeights(selectedResource, hedgeLogs);
+                  const isOverReceivedLimit = receivedLimit !== Infinity && (alreadyInjected + selectedCollectors.reduce((s, c) => s + c.amount, 0) > receivedLimit);
+
+                  return (
+                    <div className="w-full bg-slate-50 border border-slate-200 px-3.5 py-2.5 rounded-md space-y-2 text-xs">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-4 text-slate-600">
+                          <span>
+                            {initLabel}：<strong className="font-mono font-semibold text-slate-900">{formatMoney(currentInitial)}</strong>
+                          </span>
+                          <span>
+                            已占用(输入)：<strong className="font-mono font-semibold text-slate-700">{formatMoney(currentOccupied)}</strong>
+                          </span>
+                          <span>
+                            还可输入：<strong className="font-mono font-bold text-blue-600">{formatMoney(currentRemaining)}</strong>
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setIsMineDetailOpen(prev => !prev)}
+                          className="text-xs text-slate-500 hover:text-slate-800 font-medium transition-colors"
+                        >
+                          {isMineDetailOpen ? '收起明细 ▲' : '展开明细 ▼'}
+                        </button>
+                      </div>
+
+                      {isOverReceivedLimit && (
+                        <p className="text-xs font-semibold text-rose-600 pt-1 border-t border-slate-200/70">
+                          累计注入超出内部交易接收总量，提交将触发熔断
+                        </p>
+                      )}
+
+                      {isMineDetailOpen && (
+                        <div className="pt-2 border-t border-slate-200/80 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-[11px] text-slate-500">
+                          <div className="flex justify-between">
+                            <span>款初 / 款当</span>
+                            <span className="font-mono text-slate-700">{formatMoney(rawInputOccupancy.initialRevenue)} / {formatMoney(getCurrentRevenueCapacity(selectedResource, hedgeLogs))}</span>
                           </div>
-                        );
-                      }
-                      return null;
-                    })()}
-                    <div className="flex justify-between items-center text-[9px] font-bold">
-                       <span className="text-slate-500">已注入累计: <span className="text-blue-600">{formatMoney(alreadyInjected)}</span></span>
-                       <span className="text-slate-500">剩余接收额度: <span className={(receivedLimit !== Infinity && remainingQuota < selectedCollectors.reduce((s, c) => s + c.amount, 0)) ? "text-rose-600" : "text-emerald-600"}>
-                        {receivedLimit === Infinity ? '无交易限制' : formatMoney(remainingQuota)}
-                       </span></span>
+                          <div className="flex justify-between">
+                            <span>产初 / 产当</span>
+                            <span className="font-mono text-slate-700">{formatMoney(rawInputOccupancy.initialValue)} / {formatMoney(getCurrentValueCapacity(selectedResource, hedgeLogs))}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>已确权消耗 (ΣC / ΣB2)</span>
+                            <span className="font-mono text-slate-700">{formatMoney(hedgeInfo.C)} / {formatMoney(hedgeInfo.B2)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>实时对冲权 (C权 / B2权)</span>
+                            <span className="font-mono text-slate-700">{hedgeInfo.cWeightRev.toFixed(4)} / {hedgeInfo.b2Weight.toFixed(4)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>本单元已注入累计</span>
+                            <span className="font-mono text-slate-700">{formatMoney(alreadyInjected)}</span>
+                          </div>
+                          {receivedLimit !== Infinity && (
+                            <div className="flex justify-between">
+                              <span>剩余接收额度</span>
+                              <span className={`font-mono font-semibold ${remainingQuota < selectedCollectors.reduce((s, c) => s + c.amount, 0) ? 'text-rose-600' : 'text-slate-700'}`}>
+                                {formatMoney(remainingQuota)}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    {receivedLimit !== Infinity && (alreadyInjected + selectedCollectors.reduce((s, c) => s + c.amount, 0) > receivedLimit) && (
-                      <p className="text-[9px] font-black text-rose-600 animate-pulse flex items-center">
-                        <span className="mr-1">⚠️</span> 累计注入超出接收总量，触发熔断
-                      </p>
-                    )}
-                  </div>
-                )}
-                <div className="flex items-center space-x-2 w-full">
+                  );
+                })()}
+                <div className="flex items-center gap-2 w-full pt-0.5">
                   <input 
                     type="text" 
-                    placeholder="搜索编号..." 
-                    title="输入矿山编号进行快速搜索"
+                    placeholder="按编号快速定位..." 
+                    title="输入矿山编号进行快速定位"
                     value={miningSearchTerm}
                     onChange={(e) => setMiningSearchTerm(e.target.value)}
                     onKeyDown={(e) => {
@@ -2269,7 +2298,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                         }
                       }
                     }}
-                    className="flex-1 w-full min-w-[120px] bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all font-bold text-slate-800 h-10"
+                    className="flex-1 min-w-[120px] bg-slate-50/70 border border-slate-200 rounded px-2.5 py-1 text-xs outline-none focus:bg-white focus:border-slate-400 transition-all text-slate-700 h-8"
                   />
                   <button 
                     type="button"
@@ -2285,9 +2314,9 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                         toast.error('未找到对应矿山编号');
                       }
                     }}
-                    className="h-10 px-3 bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 rounded-md text-[12px] font-bold transition-colors whitespace-nowrap flex items-center shrink-0"
+                    className="h-8 px-2.5 bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200 rounded text-xs font-medium transition-colors whitespace-nowrap flex items-center shrink-0"
                   >
-                    搜索
+                    定位
                   </button>
                 </div>
               </div>
@@ -2295,7 +2324,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
 
             {/* 第 3 行 - Col 1: 业务日期 (必填，带红星) */}
             <div className="flex flex-col space-y-1.5 col-span-1 sm:col-span-1 lg:col-span-1">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
+              <label className="text-xs font-medium text-slate-600 flex items-center h-4">
                 业务日期 <span className="text-rose-500 ml-1 font-bold">*</span>
               </label>
               <input 
@@ -2314,21 +2343,17 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             {/* 第 3 行 - Col 2: 提炼配方 (只读) */}
             <div className="flex flex-col space-y-1.5 col-span-1 sm:col-span-1 lg:col-span-1">
               <div className="flex items-center space-x-1.5 h-4">
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">提炼配方</label>
+                <label className="text-xs font-medium text-slate-600">提炼配方</label>
                 {selectedResource && (
-                  hasCustomFactor ? (
-                    <span className="text-[8px] font-black text-emerald-600 animate-pulse bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 whitespace-nowrap">协议配方</span>
-                  ) : (
-                    <span className="text-[8px] font-black text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200 whitespace-nowrap">标准配方</span>
-                  )
+                  <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 whitespace-nowrap">
+                    {hasCustomFactor ? '协议配方' : '标准配方'}
+                  </span>
                 )}
               </div>
               <div className={`w-full border rounded-md px-3 py-2 text-[13px] flex items-center h-10 font-bold ${
                 !selectedResource 
                   ? 'bg-slate-50 border-slate-200 text-slate-400 font-normal'
-                  : hasCustomFactor 
-                    ? 'bg-emerald-50 border-emerald-200 text-emerald-700' 
-                    : 'bg-slate-50 border-slate-200 text-slate-700'
+                  : 'bg-slate-50 border-slate-200 text-slate-700'
               }`}>
                 {selectedResource ? (
                   <span>{selectedTier || 'T1'}</span>
@@ -2340,7 +2365,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
 
             {/* 第 3 行 - Col 3: 提炼类型 (只读) */}
             <div className="flex flex-col space-y-1.5 col-span-1 sm:col-span-1 lg:col-span-1">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">提炼类型</label>
+              <label className="text-xs font-medium text-slate-600 flex items-center h-4">提炼类型</label>
               <div className="w-full bg-slate-50 border border-slate-200 rounded-md px-3 py-2 text-[13px] flex items-center h-10 font-bold text-slate-700">
                 {selectedResource ? (
                   <span>{selectedRefineType}</span>
@@ -2353,11 +2378,11 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             {/* 第 3 行 - Col 4: 执行类型 (只读，随矿山+经营单元自动计算) */}
             <div className="flex flex-col space-y-1.5 col-span-1 sm:col-span-1 lg:col-span-1">
               <div className="flex items-center justify-between h-4">
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                <label className="text-xs font-medium text-slate-600">
                   执行类型
                 </label>
                 {selectedResource && (
-                  <span className="text-[9px] text-slate-400 font-medium truncate max-w-[100px]" title={`当前视角: ${selectedOperator?.center || user.center || '无'}`}>
+                  <span className="text-[11px] text-slate-400 font-normal truncate max-w-[100px]" title={`当前视角: ${selectedOperator?.center || user.center || '无'}`}>
                     {selectedOperator?.center || user.center || '无'}
                   </span>
                 )}
@@ -2366,12 +2391,11 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                 {selectedResource ? (() => {
                   const currentUnitForVC = selectedOperator?.center || user.center || '';
                   const et = getExecutionType(selectedResource, currentUnitForVC);
-                  const col = getExecutionTypeBadgeColor(et);
                   return (
                     <div className="flex items-center w-full">
                       <span 
                         title={EXECUTION_TYPE_EXPLANATIONS[et]}
-                        className={`px-2 py-0.5 rounded text-[10px] font-black border ${col.bg} ${col.text} ${col.border} cursor-help shadow-sm whitespace-nowrap`}
+                        className="px-2 py-0.5 rounded text-xs font-medium bg-white text-slate-700 border border-slate-200 cursor-help whitespace-nowrap"
                       >
                         {et}
                       </span>
@@ -2387,20 +2411,20 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
 
           {/* 第二行：矿山资源进度条 */}
           {selectedResource && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-8 bg-slate-50/50 p-4 rounded-sm border border-slate-100 animate-in slide-in-from-left-2 duration-300">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-8 bg-slate-50/50 p-4 rounded-sm border border-slate-100">
                <ProgressBar 
-                 label={` ${t('revenue', '收款')}目前${t('mining_resource', '矿山资源')}进度`} 
-                 subLabel={(rawInputOccupancy.revenue.confirmed + rawInputOccupancy.revenue.mined) >= getCurrentRevenueCapacity(selectedResource, hedgeLogs) ? "已采集" : `${formatMoney(rawInputOccupancy.revenue.confirmed + rawInputOccupancy.revenue.mined)} / ${formatMoney(getCurrentRevenueCapacity(selectedResource, hedgeLogs))}`}
-                 value={Math.min(rawInputOccupancy.revenue.confirmed + rawInputOccupancy.revenue.mined, getCurrentRevenueCapacity(selectedResource, hedgeLogs))}
-                 max={getCurrentRevenueCapacity(selectedResource, hedgeLogs)}
-                 color="bg-amber-500"
+                 label={`${t('revenue', '收款')}${t('mining_resource', '矿山资源')}进度`} 
+                 subLabel={rawInputOccupancy.maxAllowedRevenue <= 0 ? '已采集（还可录 0）' : `${formatMoney(rawInputOccupancy.revenue.totalOccupancy)} / ${formatMoney(rawInputOccupancy.initialRevenue)}（还可录 ${formatMoney(rawInputOccupancy.maxAllowedRevenue)}）`}
+                 value={Math.min(rawInputOccupancy.revenue.totalOccupancy, rawInputOccupancy.initialRevenue)}
+                 max={rawInputOccupancy.initialRevenue}
+                 color="bg-blue-600"
                />
                <ProgressBar 
-                 label={` ${t('production_value', '产值')}目前${t('mining_resource', '矿山资源')}进度`} 
-                 subLabel={(rawInputOccupancy.value.confirmed + rawInputOccupancy.value.mined) >= getCurrentValueCapacity(selectedResource, hedgeLogs) ? "已采集" : `${formatMoney(rawInputOccupancy.value.confirmed + rawInputOccupancy.value.mined)} / ${formatMoney(getCurrentValueCapacity(selectedResource, hedgeLogs))}`}
-                 value={Math.min(rawInputOccupancy.value.confirmed + rawInputOccupancy.value.mined, getCurrentValueCapacity(selectedResource, hedgeLogs))}
-                 max={getCurrentValueCapacity(selectedResource, hedgeLogs)}
-                 color="bg-emerald-500"
+                 label={`${t('production_value', '产值')}${t('mining_resource', '矿山资源')}进度`} 
+                 subLabel={rawInputOccupancy.maxAllowedValue <= 0 ? '已采集（还可录 0）' : `${formatMoney(rawInputOccupancy.value.totalOccupancy)} / ${formatMoney(rawInputOccupancy.initialValue)}（还可录 ${formatMoney(rawInputOccupancy.maxAllowedValue)}）`}
+                 value={Math.min(rawInputOccupancy.value.totalOccupancy, rawInputOccupancy.initialValue)}
+                 max={rawInputOccupancy.initialValue}
+                 color="bg-slate-700"
                />
             </div>
           )}
@@ -2434,7 +2458,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                     <div className={`${
                       hasAnyHedge ? 'lg:col-span-4' : 'lg:col-span-5'
                     } space-y-1`}>
-                      <label className="text-[10px] font-bold text-blue-600 uppercase">注入积分主体</label>
+                      <label className="text-xs font-medium text-slate-600">注入积分主体</label>
                       <div className="flex items-center bg-white border border-slate-200 rounded-sm px-3 py-1.5 h-10">
                         <span className="text-xs font-bold text-slate-700">
                           {formatCollectorDisplay(user || c.id, managedUsers)}
@@ -2442,7 +2466,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                       </div>
                     </div>
                     <div className={`${hasAnyHedge ? 'lg:col-span-2' : 'lg:col-span-3'} space-y-1`}>
-                      <label className="text-[10px] font-bold text-slate-400 uppercase">
+                      <label className="text-xs font-medium text-slate-600">
                         {selectedCategory === RefineCategory.Value ? '输入产值' : '输入收款'}
                       </label>
                       <input
@@ -2466,7 +2490,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                       />
                     </div>
                     <div className="lg:col-span-2 space-y-1">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase">注入积分</label>
+                      <label className="text-xs font-medium text-slate-500">注入积分</label>
                       <div className="relative">
                         <input
                           type="number"
@@ -2477,20 +2501,20 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                           placeholder="0"
                           required
                         />
-                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-[9px] font-bold font-mono uppercase">积分</span>
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] font-medium">积分</span>
                       </div>
                     </div>
                     {/* 显示 C权 和 B2权 (当有对冲时且不是收款类) */}
                     {hasAnyHedge && (
                       selectedCategory === RefineCategory.Revenue ? (
                         <div className="lg:col-span-2 space-y-1">
-                          <label className={`text-[10px] font-bold uppercase ${weights.cWeight < 1 ? 'text-amber-600' : 'text-slate-400'}`}>C权</label>
+                          <label className="text-xs font-medium text-slate-500">C权</label>
                           <div className="relative">
                             <input
                               type="text"
                               value={weights.cWeight < 1 ? weights.cWeight.toFixed(4) : '1.0000'}
                               readOnly
-                              className={`w-full border border-slate-200 bg-slate-50 rounded-sm px-2 py-1.5 text-xs font-bold font-mono outline-none cursor-not-allowed h-10 ${weights.cWeight < 1 ? 'text-rose-500' : 'text-slate-400'}`}
+                              className="w-full border border-slate-200 bg-slate-50 rounded-sm px-2 py-1.5 text-xs font-bold font-mono outline-none cursor-not-allowed h-10 text-slate-600"
                             />
                           </div>
                         </div>
@@ -2498,7 +2522,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                         <div className="lg:col-span-2 grid grid-cols-2 gap-2">
                           <div className="space-y-1">
                             <div className="flex items-center gap-1">
-                              <label className={`text-[10px] font-bold uppercase ${weights.cWeight < 1 ? 'text-amber-600' : 'text-slate-400'}`}>C权</label>
+                              <label className="text-xs font-medium text-slate-500">C权</label>
                               <InfoTip 
                                 title="C权"
                                 content={
@@ -2514,13 +2538,13 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                                 type="text"
                                 value={weights.cWeight < 1 ? weights.cWeight.toFixed(4) : '1.0000'}
                                 readOnly
-                                className={`w-full border border-slate-200 bg-slate-50 rounded-sm px-2 py-1.5 text-xs font-bold font-mono outline-none cursor-not-allowed h-10 ${weights.cWeight < 1 ? 'text-rose-500' : 'text-slate-400'}`}
+                                className="w-full border border-slate-200 bg-slate-50 rounded-sm px-2 py-1.5 text-xs font-bold font-mono outline-none cursor-not-allowed h-10 text-slate-600"
                               />
                             </div>
                           </div>
                           <div className="space-y-1">
                             <div className="flex items-center gap-1">
-                              <label className={`text-[10px] font-bold uppercase ${weights.b2Weight < 1 ? 'text-blue-600' : 'text-slate-400'}`}>B2权</label>
+                              <label className="text-xs font-medium text-slate-500">B2权</label>
                               <InfoTip 
                                 title="B2权"
                                 content="计算：(N − ΣC − ΣB2) / (N − ΣC)"
@@ -2531,7 +2555,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                                 type="text"
                                 value={weights.b2Weight < 1 ? weights.b2Weight.toFixed(4) : '1.0000'}
                                 readOnly
-                                className={`w-full border border-slate-200 bg-slate-50 rounded-sm px-2 py-1.5 text-xs font-bold font-mono outline-none cursor-not-allowed h-10 ${weights.b2Weight < 1 ? 'text-rose-500' : 'text-slate-400'}`}
+                                className="w-full border border-slate-200 bg-slate-50 rounded-sm px-2 py-1.5 text-xs font-bold font-mono outline-none cursor-not-allowed h-10 text-slate-600"
                               />
                             </div>
                           </div>
@@ -2539,7 +2563,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                       )
                     )}
                     <div className="lg:col-span-2 space-y-1">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase">
+                      <label className="text-xs font-medium text-slate-500">
                         {user && isValueExpert(user) ? '产兑包' : (user && isRevenueExpert(user) ? '收款包' : '收款包/产兑包')}
                       </label>
                       <div className="relative">
@@ -2547,7 +2571,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                           type="text"
                           value={formatMoney(calculateNetValueForCollector(c.id, c.amount))}
                           readOnly
-                          className="w-full border border-slate-200 bg-slate-50 rounded-sm px-2 py-1.5 text-sm font-bold font-mono outline-none cursor-not-allowed h-10"
+                          className="w-full border border-slate-200 bg-slate-50 rounded-sm px-2 py-1.5 text-sm font-bold font-mono outline-none cursor-not-allowed h-10 text-slate-800"
                         />
                       </div>
                     </div>
@@ -2570,51 +2594,35 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
               const confirmationRate = Math.round((finalConfirmed / (getCurrentValueCapacity(selectedResource, hedgeLogs) || 1)) * 100);
 
               return (
-                <div className="bg-emerald-50 p-4 rounded-sm border border-emerald-200 mt-2 space-y-3">
+                <div className="bg-slate-50 p-4 rounded-sm border border-slate-200 mt-2 space-y-3">
                   <div className="flex justify-between items-center">
-                    <p className="text-[10px] font-bold text-emerald-800 uppercase">{t('mining_resource', '矿山资源')}{t('status_confirmed', '确权')}预览 (实时计算)</p>
-                    <span className="text-[8px] font-bold text-emerald-600 bg-white px-2 py-0.5 rounded border border-emerald-100">{t('linked_audit', '联动确权')}已启用</span>
+                    <p className="text-xs font-semibold text-slate-700">{t('mining_resource', '矿山资源')}{t('status_confirmed', '确权')}预览</p>
+                    <span className="text-xs text-slate-500">产当：{formatMoney(getCurrentValueCapacity(selectedResource, hedgeLogs))} · 预计确权率：{confirmationRate}%</span>
                   </div>
                   
-                  <div className="bg-white/60 p-2 rounded border border-emerald-200/50">
-                    <p className="text-[8px] font-black text-slate-800 font-mono">
-                      确权核算公式：本次提报积分 ({totalInput}) 将直接计入待确权产值，并触发联动转换：min(待确权产值总和, 已确权收款总和 - 已确权产值总和)。当 (款当 - 已确权产值总和) &lt;= 0 时，转换额度为 0。
-                    </p>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                    <div className="bg-white p-2 rounded border border-emerald-100">
-                      <p className="text-[8px] text-emerald-500 font-bold uppercase mb-1">当前已确权</p>
-                      <p className="text-sm font-black text-emerald-700 font-mono">{formatMoney(currentConfirmed)}</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="bg-white p-2.5 rounded border border-slate-200">
+                      <p className="text-[11px] text-slate-500 mb-1">当前已确权</p>
+                      <p className="text-sm font-bold text-slate-800 font-mono">{formatMoney(currentConfirmed)}</p>
                     </div>
-                    <div className="bg-emerald-100 p-2 rounded border border-emerald-300">
-                      <p className="text-[8px] text-emerald-600 font-bold uppercase mb-1">预计已确权</p>
-                      <p className="text-sm font-black text-emerald-800 font-mono">
+                    <div className="bg-white p-2.5 rounded border border-slate-200">
+                      <p className="text-[11px] text-slate-500 mb-1">预计已确权</p>
+                      <p className="text-sm font-bold text-blue-600 font-mono">
                         {formatMoney(finalConfirmed)}
                       </p>
                     </div>
-                    <div className="bg-amber-50 p-2 rounded border border-amber-200 flex flex-col justify-center">
-                      <p className="text-[8px] text-amber-600 font-bold uppercase mb-1">预计待确权</p>
-                      <p className="text-sm font-black text-amber-700 font-mono">
+                    <div className="bg-white p-2.5 rounded border border-slate-200 flex flex-col justify-center">
+                      <p className="text-[11px] text-slate-500 mb-1">预计待确权</p>
+                      <p className="text-sm font-bold text-slate-800 font-mono">
                         {formatMoney(finalPending)}
                       </p>
-                      <div className="text-[8px] text-amber-600/80 mt-1 font-mono leading-tight border-t border-amber-200/50 pt-1">
-                        <p>原待确权: {formatMoney(currentPending)}</p>
-                        <p>+ 本次提报: {formatMoney(totalInput)}</p>
-                        <p>- 联动转换: {formatMoney(conversionAmount)}</p>
-                      </div>
                     </div>
-                    <div className="bg-white p-2 rounded border border-slate-100">
-                      <p className="text-[8px] text-slate-400 font-bold uppercase mb-1">剩余未确权</p>
-                      <p className="text-sm font-black text-slate-600 font-mono">
+                    <div className="bg-white p-2.5 rounded border border-slate-200">
+                      <p className="text-[11px] text-slate-500 mb-1">剩余未确权</p>
+                      <p className="text-sm font-bold text-slate-600 font-mono">
                         {formatMoney(remainingUnconfirmed)}
                       </p>
                     </div>
-                  </div>
-
-                  <div className="text-[8px] text-emerald-600/70 font-bold uppercase pt-2 border-t border-emerald-100 flex justify-between">
-                    <span>产当：{formatMoney(getCurrentValueCapacity(selectedResource, hedgeLogs))}</span>
-                    <span>预计确权率：{confirmationRate}%</span>
                   </div>
                 </div>
               );
@@ -2623,12 +2631,12 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             {selectedCollectors.length > 0 && (
               <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
                 <div className="flex items-center space-x-4">
-                  <div className="text-center px-4 py-2 bg-slate-100 rounded-sm">
-                    <p className="text-[8px] font-bold text-slate-400 uppercase">总注入积分</p>
-                    <p className="text-lg font-black text-slate-800 font-mono">{formatMoney(selectedCollectors.reduce((sum, c) => sum + c.amount, 0))}</p>
+                  <div className="text-center px-4 py-2 bg-slate-50 rounded-sm border border-slate-200">
+                    <p className="text-[11px] font-medium text-slate-500">总注入积分</p>
+                    <p className="text-lg font-bold text-slate-900 font-mono">{formatMoney(selectedCollectors.reduce((sum, c) => sum + c.amount, 0))}</p>
                   </div>
-                  <div className="text-center px-4 py-2 bg-emerald-50 rounded-sm border border-emerald-100 relative group">
-                    <p className="text-[8px] font-bold text-emerald-600 uppercase">
+                  <div className="text-center px-4 py-2 bg-slate-50 rounded-sm border border-slate-200 relative group">
+                    <p className="text-[11px] font-medium text-slate-500">
                       {(() => {
                         if (selectedCollectors.length > 0) {
                           const firstUser = managedUsers.find(u => u.id === selectedCollectors[0].id);
@@ -2638,7 +2646,7 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
                         return '总收款包/产兑包';
                       })()}
                     </p>
-                    <p className="text-lg font-black text-emerald-700 font-mono">+{formatMoney(totalNetValue)}</p>
+                    <p className="text-lg font-bold text-blue-600 font-mono">+{formatMoney(totalNetValue)}</p>
                     <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-4 py-2 bg-slate-900 border border-slate-700 text-white text-[9px] font-bold rounded-lg shadow-2xl opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-20">
                       <div className="space-y-1">
                         <p className="border-b border-slate-700 pb-1 text-blue-400">核算路径分析</p>
@@ -2763,9 +2771,8 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         {/* 价值动态流 (收款轨/产值轨) */}
         <div className="p-6 bg-slate-50/50 border-b border-slate-200 space-y-4">
           <div className="border-b border-slate-200 pb-2">
-            <h4 className="text-sm font-black text-slate-900 tracking-tight flex items-center gap-2">
-              <span className="w-2.5 h-2.5 bg-blue-600 rounded-sm"></span>
-              {UI_LABELS.VALUE_FLOW} <span className="text-[10px] font-bold text-slate-500 px-2 py-0.5 bg-slate-100 rounded">
+            <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+              {UI_LABELS.VALUE_FLOW} <span className="text-xs font-medium text-slate-500 px-2 py-0.5 bg-slate-100 rounded">
                 {selectedResource ? `矿山: ${selectedResource.id}` : '系统累计'}
               </span>
             </h4>
@@ -2774,28 +2781,28 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             {/* 收款 */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-black text-yellow-700 uppercase tracking-widest flex items-center">
-                  <span className="w-1.5 h-3.5 bg-yellow-500 mr-2 rounded-full"></span>
+                <span className="text-xs font-semibold text-slate-700 flex items-center">
+                  <span className="w-1.5 h-3.5 bg-blue-600 mr-2 rounded-full"></span>
                   {UI_LABELS.REVENUE}
                 </span>
-                <span className="text-[10px] font-bold text-slate-400">{UI_LABELS.REVENUE}当限: {formatMoney(quadrantData.revenue.capacity)}</span>
+                <span className="text-xs text-slate-500">{UI_LABELS.REVENUE}当限: {formatMoney(quadrantData.revenue.capacity)}</span>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
-                  <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.PENDING}</p>
-                  <p className="text-xs font-black text-amber-600 font-mono">{formatMoney(quadrantData.revenue.pending)}</p>
+                <div className="bg-white p-3.5 rounded-sm border border-slate-200 text-center">
+                  <p className="text-[11px] font-medium text-slate-500 mb-1">{UI_LABELS.PENDING}</p>
+                  <p className="text-xs font-bold text-slate-700 font-mono">{formatMoney(quadrantData.revenue.pending)}</p>
                 </div>
-                <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
-                  <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.CONFIRMED}</p>
-                  <p className="text-xs font-black text-emerald-600 font-mono">{formatMoney(quadrantData.revenue.confirmed)}</p>
+                <div className="bg-white p-3.5 rounded-sm border border-slate-200 text-center">
+                  <p className="text-[11px] font-medium text-slate-500 mb-1">{UI_LABELS.CONFIRMED}</p>
+                  <p className="text-xs font-bold text-slate-900 font-mono">{formatMoney(quadrantData.revenue.confirmed)}</p>
                 </div>
-                <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
-                  <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.UNCONFIRMED}</p>
-                  <p className="text-xs font-black text-rose-600 font-mono">{formatMoney(quadrantData.revenue.unconfirmed)}</p>
+                <div className="bg-white p-3.5 rounded-sm border border-slate-200 text-center">
+                  <p className="text-[11px] font-medium text-slate-500 mb-1">{UI_LABELS.UNCONFIRMED}</p>
+                  <p className="text-xs font-bold text-slate-600 font-mono">{formatMoney(quadrantData.revenue.unconfirmed)}</p>
                 </div>
-                <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
-                  <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.MINED}</p>
-                  <p className="text-xs font-black text-blue-600 font-mono">{formatMoney(quadrantData.revenue.mined)}</p>
+                <div className="bg-white p-3.5 rounded-sm border border-slate-200 text-center">
+                  <p className="text-[11px] font-medium text-slate-500 mb-1">{UI_LABELS.MINED}</p>
+                  <p className="text-xs font-bold text-blue-600 font-mono">{formatMoney(quadrantData.revenue.mined)}</p>
                 </div>
               </div>
             </div>
@@ -2803,28 +2810,28 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
             {/* 产值 */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-black text-rose-700 uppercase tracking-widest flex items-center">
-                  <span className="w-1.5 h-3.5 bg-rose-500 mr-2 rounded-full"></span>
+                <span className="text-xs font-semibold text-slate-700 flex items-center">
+                  <span className="w-1.5 h-3.5 bg-slate-700 mr-2 rounded-full"></span>
                   {UI_LABELS.VALUE}
                 </span>
-                <span className="text-[10px] font-bold text-slate-400">{UI_LABELS.VALUE}当限: {formatMoney(quadrantData.value.capacity)}</span>
+                <span className="text-xs text-slate-500">{UI_LABELS.VALUE}当限: {formatMoney(quadrantData.value.capacity)}</span>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
-                  <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.PENDING}</p>
-                  <p className="text-xs font-black text-amber-600 font-mono">{formatMoney(quadrantData.value.pending)}</p>
+                <div className="bg-white p-3.5 rounded-sm border border-slate-200 text-center">
+                  <p className="text-[11px] font-medium text-slate-500 mb-1">{UI_LABELS.PENDING}</p>
+                  <p className="text-xs font-bold text-slate-700 font-mono">{formatMoney(quadrantData.value.pending)}</p>
                 </div>
-                <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
-                  <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.CONFIRMED}</p>
-                  <p className="text-xs font-black text-emerald-600 font-mono">{formatMoney(quadrantData.value.confirmed)}</p>
+                <div className="bg-white p-3.5 rounded-sm border border-slate-200 text-center">
+                  <p className="text-[11px] font-medium text-slate-500 mb-1">{UI_LABELS.CONFIRMED}</p>
+                  <p className="text-xs font-bold text-slate-900 font-mono">{formatMoney(quadrantData.value.confirmed)}</p>
                 </div>
-                <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
-                  <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.UNCONFIRMED}</p>
-                  <p className="text-xs font-black text-rose-600 font-mono">{formatMoney(quadrantData.value.unconfirmed)}</p>
+                <div className="bg-white p-3.5 rounded-sm border border-slate-200 text-center">
+                  <p className="text-[11px] font-medium text-slate-500 mb-1">{UI_LABELS.UNCONFIRMED}</p>
+                  <p className="text-xs font-bold text-slate-600 font-mono">{formatMoney(quadrantData.value.unconfirmed)}</p>
                 </div>
-                <div className="bg-white p-3.5 rounded-sm border border-slate-200 shadow-sm text-center">
-                  <p className="text-[9px] font-black text-slate-400 uppercase mb-1">{UI_LABELS.MINED}</p>
-                  <p className="text-xs font-black text-blue-600 font-mono">{formatMoney(quadrantData.value.mined)}</p>
+                <div className="bg-white p-3.5 rounded-sm border border-slate-200 text-center">
+                  <p className="text-[11px] font-medium text-slate-500 mb-1">{UI_LABELS.MINED}</p>
+                  <p className="text-xs font-bold text-blue-600 font-mono">{formatMoney(quadrantData.value.mined)}</p>
                 </div>
               </div>
             </div>
@@ -2832,27 +2839,27 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         </div>
 
         {/* 确权统计摘要 (收产包/收款包/产兑包 - netValue 口径) */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-6 bg-slate-55 border-b border-slate-200">
-          <div className="bg-gradient-to-br from-indigo-50 to-indigo-100/50 p-4 rounded-sm border border-indigo-200 shadow-sm flex flex-col justify-between">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-6 bg-white border-b border-slate-200">
+          <div className="bg-slate-50 p-4 rounded-sm border border-slate-200 flex flex-col justify-between">
             <div>
-              <p className="text-[10px] text-indigo-700 font-bold uppercase tracking-wider mb-1">收产包</p>
-              <p className="text-2xl font-black text-indigo-900 font-mono">{formatMoney(summaryIncomePackage)}</p>
+              <p className="text-xs text-slate-600 font-medium mb-1">收产包</p>
+              <p className="text-2xl font-bold text-blue-600 font-mono">{formatMoney(summaryIncomePackage)}</p>
             </div>
-            <p className="text-[9px] text-indigo-500 mt-2 font-medium">公式: 收款包 + 产兑包</p>
+            <p className="text-[11px] text-slate-400 mt-2">公式: 收款包 + 产兑包</p>
           </div>
-          <div className="bg-gradient-to-br from-amber-50 to-amber-100/50 p-4 rounded-sm border border-amber-200 shadow-sm flex flex-col justify-between">
+          <div className="bg-slate-50 p-4 rounded-sm border border-slate-200 flex flex-col justify-between">
             <div>
-              <p className="text-[10px] text-amber-700 font-bold uppercase tracking-wider mb-1">收款包</p>
-              <p className="text-2xl font-black text-amber-900 font-mono">{formatMoney(summaryRevenuePackage)}</p>
+              <p className="text-xs text-slate-600 font-medium mb-1">收款包</p>
+              <p className="text-2xl font-bold text-slate-900 font-mono">{formatMoney(summaryRevenuePackage)}</p>
             </div>
-            <p className="text-[9px] text-amber-500 mt-2 font-medium">公式: 收款包合计</p>
+            <p className="text-[11px] text-slate-400 mt-2">公式: 收款包合计</p>
           </div>
-          <div className="bg-gradient-to-br from-emerald-50 to-emerald-100/50 p-4 rounded-sm border border-emerald-200 shadow-sm flex flex-col justify-between">
+          <div className="bg-slate-50 p-4 rounded-sm border border-slate-200 flex flex-col justify-between">
             <div>
-              <p className="text-[10px] text-emerald-700 font-bold uppercase tracking-wider mb-1">产兑包</p>
-              <p className="text-2xl font-black text-emerald-950 font-mono">{formatMoney(summaryValuePackage)}</p>
+              <p className="text-xs text-slate-600 font-medium mb-1">产兑包</p>
+              <p className="text-2xl font-bold text-slate-900 font-mono">{formatMoney(summaryValuePackage)}</p>
             </div>
-            <p className="text-[9px] text-emerald-600 mt-2 font-medium">公式: 产兑包合计</p>
+            <p className="text-[11px] text-slate-400 mt-2">公式: 产兑包合计</p>
           </div>
         </div>
 
@@ -2964,24 +2971,24 @@ const ValueCreation: React.FC<ValueCreationProps> = ({
         {/* 桌面端表格视图 (Desktop Table View) */}
         <div className="hidden md:block overflow-x-auto border-b border-slate-100 pb-2 custom-scrollbar">
           <table className="w-full text-left whitespace-nowrap min-w-max">
-            <thead className="bg-white z-10 shadow-sm">
-              <tr className="bg-slate-50/90 text-[9px] font-bold text-slate-400 uppercase border-b border-slate-200">
-                <th className="px-2 py-4">矿山编号</th>
-                <th className="px-2 py-4">类别</th>
-                <th className="px-2 py-4">编号</th>
-                <th className="px-2 py-4 hidden md:table-cell">业务日期</th>
-                <th className="px-2 py-4 hidden md:table-cell">提交日期</th>
-                <th className="px-2 py-4">{TERMINOLOGY.BUSINESS_UNIT}</th>
-                <th className="px-2 py-4">{TERMINOLOGY.LOG_OPERATOR_ID}</th>
-                <th className="px-2 py-4">确权类型</th>
-                <th className="px-2 py-4 text-right">输入数值</th>
-                <th className="px-2 py-4 text-right">注入积分</th>
-                <th className="px-2 py-4 text-right">C权</th>
-                <th className="px-2 py-4 text-right">B2权</th>
-                <th className="px-2 py-4 text-right">产兑包</th>
-                <th className="px-2 py-4 text-right">收款包</th>
-                <th className="px-2 py-4 hidden md:table-cell">确权日期</th>
-                <th className="px-2 py-4">状态</th>
+            <thead className="bg-white z-10">
+              <tr className="bg-slate-50/90 text-xs font-medium text-slate-500 border-b border-slate-200">
+                <th className="px-2 py-3">矿山编号</th>
+                <th className="px-2 py-3">类别</th>
+                <th className="px-2 py-3">编号</th>
+                <th className="px-2 py-3 hidden md:table-cell">业务日期</th>
+                <th className="px-2 py-3 hidden md:table-cell">提交日期</th>
+                <th className="px-2 py-3">{TERMINOLOGY.BUSINESS_UNIT}</th>
+                <th className="px-2 py-3">{TERMINOLOGY.LOG_OPERATOR_ID}</th>
+                <th className="px-2 py-3">确权类型</th>
+                <th className="px-2 py-3 text-right">输入数值</th>
+                <th className="px-2 py-3 text-right">注入积分</th>
+                <th className="px-2 py-3 text-right">C权</th>
+                <th className="px-2 py-3 text-right">B2权</th>
+                <th className="px-2 py-3 text-right">产兑包</th>
+                <th className="px-2 py-3 text-right">收款包</th>
+                <th className="px-2 py-3 hidden md:table-cell">确权日期</th>
+                <th className="px-2 py-3">状态</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">

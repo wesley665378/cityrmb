@@ -25,6 +25,7 @@ import PersonnelPool from './views/PersonnelPool';
 import InternalTransactions from './views/InternalTransactions';
 import DynamicConsumption from './views/DynamicConsumption';
 import MyAccount from './views/MyAccount';
+import MobileAccount from './views/MobileAccount';
 import SystemInstructions from './views/SystemInstructions';
 import Sidebar from './components/Sidebar';
 import Login from './src/components/Login';
@@ -1166,11 +1167,26 @@ const AppContent: React.FC = () => {
   }, [workspaceLoaded, currentUser, auditPendingCounts.totalPendingCount]);
 
   useEffect(() => {
-    if (currentUser && !checkUserPermission(currentUser, activeTab)) {
+    const permTarget = activeTab === 'mobile-account' ? 'account' : activeTab;
+    if (currentUser && !checkUserPermission(currentUser, permTarget)) {
       const firstAllowed = MENU_ITEMS.find(item => checkUserPermission(currentUser, item.id))?.id || 'collectors';
       setActiveTab(firstAllowed);
     }
   }, [currentUser, activeTab]);
+
+  useEffect(() => {
+    const syncHashRoute = () => {
+      const hash = window.location.hash;
+      if (hash === '#/mobile-account' || hash.startsWith('#/mobile-account?')) {
+        setActiveTab('mobile-account');
+      } else if (hash === '#/dynamic-consumption' || hash.startsWith('#/dynamic-consumption?')) {
+        setActiveTab('consumption');
+      }
+    };
+    syncHashRoute();
+    window.addEventListener('hashchange', syncHashRoute);
+    return () => window.removeEventListener('hashchange', syncHashRoute);
+  }, []);
 
   const filteredTransactions = useMemo(() => {
     return filterTransactionsByCenter(transactions, currentUser, managedUsers);
@@ -1283,6 +1299,12 @@ const AppContent: React.FC = () => {
       subtitle: '个人账户中心 · 个人资产与凭证',
       icon: '👤',
       badge: '个人资产'
+    },
+    'mobile-account': {
+      title: t('my_account', '我的帐户'),
+      subtitle: '移动账户中心 · 个人资产与流水',
+      icon: '📱',
+      badge: '移动视图'
     },
     instructions: {
       title: t('system_instructions', '系统说明'),
@@ -1533,11 +1555,20 @@ const AppContent: React.FC = () => {
       evaluation: <Evaluation {...tabProps.evaluation} />,
       distribution: <Distribution {...tabProps.distribution} />,
       account: <MyAccount {...tabProps.account} />,
+      'mobile-account': (
+        <MobileAccount
+          onNavigate={(path) => {
+            if (path.includes('dynamic-consumption')) {
+              handleTabChange('consumption');
+            }
+          }}
+        />
+      ),
       collectors: <PersonnelPool {...tabProps.collectors} />,
       personnel: <PersonnelPool {...tabProps.personnel} />,
       instructions: <SystemInstructions />
     };
-  }, [tabProps, currentUser]);
+  }, [tabProps, currentUser, handleTabChange]);
 
   const renderContent = () => {
     if (!currentUser) return null;
@@ -1630,6 +1661,16 @@ const AppContent: React.FC = () => {
           </div>
           
           <div className="flex items-center space-x-2 md:space-x-4 shrink-0">
+            {(activeTab === 'account' || activeTab === 'mobile-account') && (
+              <button
+                onClick={() => handleTabChange(activeTab === 'mobile-account' ? 'account' : 'mobile-account')}
+                className="text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 font-black text-xs flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg transition-colors"
+                title={activeTab === 'mobile-account' ? '切换回桌面版我的帐户' : '切换到移动版我的帐户'}
+              >
+                <span>{activeTab === 'mobile-account' ? '💻' : '📱'}</span>
+                <span>{activeTab === 'mobile-account' ? '桌面版' : '移动版'}</span>
+              </button>
+            )}
             <div className="hidden lg:flex items-center space-x-2 font-bold text-slate-400 mr-1">
                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
                <span className="uppercase tracking-widest font-black text-[10px]">系统运行正常</span>

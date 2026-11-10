@@ -322,8 +322,14 @@ export interface ValueCreationLog {
   refineTier?: 'T1' | 'T2' | 'T3'; // 价值创造提炼成色档位（T1/T2/T3），新写路径专用
   costCategory?: 'A' | 'B' | 'C' | 'D' | string; // 动态消耗计入类别（A/B/C/D）；写路径仅消耗单写入，历史创造单仅作迁移期兼容读取
   valueConsumptionMode?: 'B1' | 'B2'; // 产值B类消耗模式
-  payeeType?: 'EMPLOYEE' | 'SUPPLIER'; // 支付对象：EMPLOYEE(员工代付) | SUPPLIER(供应商直付)
-  payeeName?: string; // 供应商名称（仅当 payeeType === 'SUPPLIER' 时填写）
+  payeeType?: 'EMPLOYEE' | 'SUPPLIER' | 'PETTY_SETTLE' | string; // 支付对象：EMPLOYEE(采集主体代付) | SUPPLIER(直付供应商) | PETTY_SETTLE(借支平账)
+  payMethod?: 'PETTY_SETTLE' | string;
+  payeeName?: string; // 流水对方户名（纯姓名或企业全称，绝不包含业务后缀）
+  payeeUserId?: string; // 代付/借款员工用户 ID
+  needBankMatch?: boolean; // 是否需纳入银行流水校验 (借支平账模式强隔离/特例突破)
+  originalBorrowAmount?: number; // 原预借积分 (借支平账)
+  invoices?: Array<{ invoiceNo: string; amount: number }>; // 发票明细列表 (发票号与数值)
+  bankTransactionNo?: string; // 匹配成功后的银行交易流水号
   amount: number; // 积分/资源量
   rawAmount: number; // 原始注入总量（用于动态对冲计算基准）
   dynamicCost: number; // 动态消耗（同步录入费用）

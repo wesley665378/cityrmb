@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Upload, CheckCircle2, AlertTriangle, AlertCircle, FileText, X, Sparkles } from 'lucide-react';
+import { Upload, CheckCircle2, AlertTriangle, AlertCircle, FileText, X, Sparkles, Download } from 'lucide-react';
 import { toast } from 'sonner';
+import * as XLSX from 'xlsx';
 import { verifyBankStatement, confirmStatementConflicts, BankStatementVerificationResult } from '../api/audit';
 
 export interface StatementVerificationModalProps {
@@ -23,11 +24,79 @@ export const StatementVerificationModal: React.FC<StatementVerificationModalProp
 
   if (!isOpen) return null;
 
+  // 下载标准模板功能
+  const handleDownloadTemplate = () => {
+    try {
+      const templateData = [
+        {
+          '收(付)方名称': '严琼',
+          '借方金额': 319.21,
+          '摘要': '转账-严琼交通费报销',
+          '流水号': 'BNK20261024001',
+          '业务摘要': '严琼交通费'
+        }
+      ];
+
+      const worksheet = XLSX.utils.json_to_sheet(templateData, {
+        header: ['收(付)方名称', '借方金额', '摘要', '流水号', '业务摘要']
+      });
+
+      worksheet['!cols'] = [
+        { wch: 18 }, // 收(付)方名称
+        { wch: 14 }, // 借方金额
+        { wch: 28 }, // 摘要
+        { wch: 22 }, // 流水号
+        { wch: 22 }  // 业务摘要
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, '流水校验');
+      XLSX.writeFile(workbook, '流水校验标准模板.xlsx');
+      toast.success('已生成并自动下载：流水校验标准模板.xlsx');
+    } catch (err) {
+      console.error('Download template error:', err);
+      window.open('/api/finance/download-template', '_blank');
+    }
+  };
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
+    if (!selectedFile) return;
+
+    try {
+      // 校验文件表头格式（防呆）
+      const arrayBuffer = await selectedFile.arrayBuffer();
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+      const firstSheetName = workbook.SheetNames[0];
+      const firstSheet = workbook.Sheets[firstSheetName];
+      const rawRows: any[] = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
+
+      if (rawRows.length > 0) {
+        const sampleRowKeys = Object.keys(rawRows[0]).map(k => String(k).trim().replace(/\s+/g, ''));
+        const hasPayeeHeader = sampleRowKeys.some(k => k.includes('收(付)方名称') || k.includes('收付方名称') || k.includes('对方户名') || k.includes('户名') || k.includes('名称') || k.includes('对方') || k.includes('收款') || k.includes('付款'));
+        const hasAmountHeader = sampleRowKeys.some(k => k.includes('借方金额') || k.includes('金额') || k.includes('发生额') || k.includes('支出') || k.includes('收入'));
+        const hasIdHeader = sampleRowKeys.some(k => k.includes('流水号') || k.includes('凭证号') || k.includes('单号') || k.includes('报文号'));
+
+        if (!hasPayeeHeader || !hasAmountHeader || !hasIdHeader) {
+          toast.error('模板格式错误，请下载最新的标准模板重试！');
+          e.target.value = '';
+          setFile(null);
+          return;
+        }
+      } else {
+        toast.error('模板格式错误，请下载最新的标准模板重试！');
+        e.target.value = '';
+        setFile(null);
+        return;
+      }
+
       setFile(selectedFile);
       await executeVerification(selectedFile);
+    } catch (err: any) {
+      console.error('Verification file check failed:', err);
+      toast.error('模板格式错误，请下载最新的标准模板重试！');
+      e.target.value = '';
+      setFile(null);
     }
   };
 
@@ -78,7 +147,19 @@ export const StatementVerificationModal: React.FC<StatementVerificationModalProp
 
     const confirmations: Array<{ logId: string; transactionId?: string }> = [];
 
-    // Add candidate selections from conflict resolution area
+    // 1. Add ALL auto-matched items
+    if (result?.matched) {
+      for (const m of result.matched) {
+        if (m.matchedLog?.id) {
+          confirmations.push({
+            logId: m.matchedLog.id,
+            transactionId: m.statementItem?.transactionId
+          });
+        }
+      }
+    }
+
+    // 2. Add selected candidate items from conflict area
     if (result?.conflicts) {
       for (const conflict of result.conflicts) {
         const chosenLogId = selectedCandidates[conflict.statementItem.id];
@@ -91,19 +172,22 @@ export const StatementVerificationModal: React.FC<StatementVerificationModalProp
       }
     }
 
+    if (confirmations.length === 0) {
+      toast.error('暂无待处理的比对或勾选单据');
+      return;
+    }
+
     setIsConfirming(true);
     const toastId = toast.loading('正在提交批量确权更新…');
 
     try {
-      if (confirmations.length > 0) {
-        await confirmStatementConflicts(confirmations);
-      }
+      await confirmStatementConflicts(confirmations);
       
       if (onSuccessRefresh) {
         await onSuccessRefresh();
       }
 
-      toast.success('批量确权更新成功！系统数据与状态已同步。', { id: toastId });
+      toast.success(`批量确权更新成功！共处理 ${confirmations.length} 笔单据。`, { id: toastId });
       onClose();
     } catch (err: any) {
       toast.error(`更新确权失败: ${err?.message || '系统繁忙'}`, { id: toastId });
@@ -129,7 +213,7 @@ export const StatementVerificationModal: React.FC<StatementVerificationModalProp
                 城市守护者 - 导入 + 流水校验
               </h3>
               <p className="text-[11px] text-slate-400 font-medium">
-                提取对方户名与流水号，自动与待确权资产单据核对
+                提取对方户名与流水号，自动与待确权消耗单据核对
               </p>
             </div>
           </div>
@@ -159,6 +243,15 @@ export const StatementVerificationModal: React.FC<StatementVerificationModalProp
             </div>
 
             <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
+              <button
+                type="button"
+                onClick={handleDownloadTemplate}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-sm cursor-pointer transition-all flex items-center gap-2"
+              >
+                <Download className="w-4 h-4" />
+                <span>下载标准模板 (.xlsx)</span>
+              </button>
+
               <label className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs shadow-sm cursor-pointer transition-all flex items-center gap-2">
                 <FileText className="w-4 h-4" />
                 <span>选择 Excel 文件上传</span>
@@ -207,12 +300,12 @@ export const StatementVerificationModal: React.FC<StatementVerificationModalProp
                   <div className="flex items-center justify-between text-emerald-800 font-bold">
                     <span className="flex items-center gap-1.5 text-xs">
                       <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                      校验通过（已自动匹配）
+                      校验通过（待确认批量确权）
                     </span>
                     <span className="text-lg font-black font-mono">{result.summary.matchedCount} 笔</span>
                   </div>
                   <p className="text-[10px] text-emerald-700/80 leading-tight">
-                    户名精准命中唯一待确权记录，已自动更新状态并回写流水号
+                    户名精准命中唯一待确权消耗单据，确认后将批量写入交易流水号并完成确权
                   </p>
                 </div>
 
@@ -226,7 +319,7 @@ export const StatementVerificationModal: React.FC<StatementVerificationModalProp
                     <span className="text-lg font-black font-mono">{result.summary.conflictCount} 笔</span>
                   </div>
                   <p className="text-[10px] text-amber-700/80 leading-tight">
-                    匹配到多条候选待确权单据，请在下方冲突处理区域勾选指定单据
+                    匹配到多条候选待确权消耗单据，请在下方冲突处理区域勾选指定单据
                   </p>
                 </div>
 
@@ -244,6 +337,45 @@ export const StatementVerificationModal: React.FC<StatementVerificationModalProp
                   </p>
                 </div>
               </div>
+
+              {/* Matched Detail List Area (自动匹配成功明细区) */}
+              {result.matched && result.matched.length > 0 && (
+                <div className="space-y-3 border-t border-slate-100 pt-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-black uppercase text-slate-800 tracking-wider flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                      自动匹配成功明细 (共 {result.matched.length} 笔，提交时将一并批量确权)
+                    </h4>
+                  </div>
+                  <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar pr-1">
+                    {result.matched.map((item, idx) => (
+                      <div 
+                        key={item.matchedLog?.id || idx}
+                        className="bg-emerald-50/50 border border-emerald-200/80 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 text-xs"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="px-2 py-0.5 bg-emerald-600 text-white rounded text-[10px] font-black">
+                            匹配 #{idx + 1}
+                          </span>
+                          <div>
+                            <span className="font-bold text-slate-800">
+                              系统单号: <span className="font-mono text-blue-600">#{item.matchedLog.id}</span>
+                            </span>
+                            <span className="text-slate-300 mx-2">|</span>
+                            <span className="text-slate-600">
+                              对方户名/支付对象: <strong className="text-slate-900">{item.statementItem.payeeName || item.matchedLog.payeeName || '-'}</strong>
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4 font-mono font-bold text-slate-700">
+                          <span>数值: <span className="text-emerald-700">{Math.round(item.matchedLog.dynamicCost || item.statementItem.amount || 0).toLocaleString()}</span></span>
+                          <span className="text-slate-400 text-[11px]">流水号: {item.statementItem.transactionId}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Conflict Handling Area (冲突处理区域) */}
               {result.conflicts && result.conflicts.length > 0 && (
@@ -273,7 +405,7 @@ export const StatementVerificationModal: React.FC<StatementVerificationModalProp
                             <span>对方户名: <strong className="text-blue-700">{conflict.statementItem.payeeName}</strong></span>
                           </div>
                           <div className="flex items-center gap-4 font-mono font-bold text-slate-700">
-                            <span>金额: <span className="text-rose-600">￥{conflict.statementItem.amount.toLocaleString()}</span></span>
+                            <span>数值: <span className="text-amber-800">{Math.round(conflict.statementItem.amount).toLocaleString()}</span></span>
                             <span>交易时间: <span className="text-slate-500">{conflict.statementItem.transactionTime}</span></span>
                             <span>流水号: <span className="text-slate-500">{conflict.statementItem.transactionId}</span></span>
                           </div>
@@ -324,8 +456,8 @@ export const StatementVerificationModal: React.FC<StatementVerificationModalProp
                                   </div>
 
                                   <div className="text-right font-mono">
-                                    <span className="text-xs font-black text-rose-600">
-                                      ￥{Math.round(candidate.dynamicCost || candidate.amount || 0).toLocaleString()}
+                                    <span className="text-xs font-black text-amber-800">
+                                      数值: {Math.round(candidate.dynamicCost || candidate.amount || 0).toLocaleString()}
                                     </span>
                                   </div>
                                 </label>
@@ -348,8 +480,8 @@ export const StatementVerificationModal: React.FC<StatementVerificationModalProp
                   <div className="bg-rose-50/40 border border-rose-200/60 rounded-xl p-3 space-y-1 text-[11px]">
                     {result.exceptions.map((exc, i) => (
                       <div key={i} className="flex justify-between items-center text-rose-800 font-mono">
-                        <span>户名: <strong>{exc.statementItem.payeeName}</strong> ({exc.statementItem.transactionTime})</span>
-                        <span>金额: ￥{exc.statementItem.amount.toLocaleString()} ({exc.reason})</span>
+                        <span>对方户名: <strong>{exc.statementItem.payeeName}</strong> ({exc.statementItem.transactionTime})</span>
+                        <span>数值: {Math.round(exc.statementItem.amount).toLocaleString()} ({exc.reason})</span>
                       </div>
                     ))}
                   </div>

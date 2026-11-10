@@ -250,8 +250,67 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<RefineCategory>(RefineCategory.Revenue);
   const [costCategory, setCostCategory] = useState<'A' | 'B' | 'C' | 'D'>('A');
   const [valueConsumptionMode, setValueConsumptionMode] = useState<'B1' | 'B2'>('B1');
-  const [payeeType, setPayeeType] = useState<'EMPLOYEE' | 'SUPPLIER'>('EMPLOYEE');
+  const [payeeType, setPayeeType] = useState<'EMPLOYEE' | 'SUPPLIER' | 'PETTY_SETTLE'>('EMPLOYEE');
   const [payeeName, setPayeeName] = useState<string>('');
+  const [payeeUserId, setPayeeUserId] = useState<string>('');
+  const [originalBorrowAmount, setOriginalBorrowAmount] = useState<number>(0);
+  const [invoices, setInvoices] = useState<Array<{ id: string; invoiceNo: string; amount: number }>>([
+    { id: '1', invoiceNo: '', amount: 0 }
+  ]);
+  const [needBankMatch, setNeedBankMatch] = useState<boolean>(false);
+
+  const invoiceTotal = useMemo(() => {
+    return invoices.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+  }, [invoices]);
+
+  const diffAmount = useMemo(() => {
+    return invoiceTotal - (Number(originalBorrowAmount) || 0);
+  }, [invoiceTotal, originalBorrowAmount]);
+
+  useEffect(() => {
+    if (payeeType === 'PETTY_SETTLE') {
+      if (invoiceTotal > 0) {
+        setDynamicCost(invoiceTotal);
+      } else if (originalBorrowAmount > 0) {
+        setDynamicCost(originalBorrowAmount);
+      }
+    }
+  }, [payeeType, invoiceTotal, originalBorrowAmount]);
+
+  useEffect(() => {
+    if (payeeType === 'PETTY_SETTLE' && diffAmount <= 0) {
+      setNeedBankMatch(false);
+    }
+  }, [payeeType, diffAmount]);
+
+  const handleAddInvoice = () => {
+    setInvoices(prev => [
+      ...prev,
+      { id: Date.now().toString(), invoiceNo: '', amount: 0 }
+    ]);
+  };
+
+  const handleRemoveInvoice = (id: string) => {
+    setInvoices(prev => prev.length > 1 ? prev.filter(inv => inv.id !== id) : prev);
+  };
+
+  const handleInvoiceChange = (id: string, field: 'invoiceNo' | 'amount', value: string | number) => {
+    setInvoices(prev => prev.map(inv => {
+      if (inv.id === id) {
+        return { ...inv, [field]: value };
+      }
+      return inv;
+    }));
+  };
+
+  const handleInvoiceKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, index: number) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (index === invoices.length - 1) {
+        handleAddInvoice();
+      }
+    }
+  };
   const [dynamicCost, setDynamicCost] = useState<number>(0);
   const [businessDate, setBusinessDate] = useState<string>(() => getLocalDateString());
   const [businessMonth, setBusinessMonth] = useState<string>(() => getLocalMonthString());
@@ -405,31 +464,83 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
     if (isLocked('dc-submit')) return;
     const isB2 = costCategory === 'B' && valueConsumptionMode === 'B2';
     const isD = costCategory === 'D';
+    const isPayeeSectionActive = isB2 || isD;
     
     if (selectedType !== RefineType.NonEffectiveHours && !costCategory) {
       showAlert('请选择消耗类别（A/B1/B2/C/D）。');
       return;
     }
 
-    if ((!isD && !selectedMiningId) || !selectedType || (!recordedCollectorId && !isSysCollector && !isD) || dynamicCost <= 0) {
-      showAlert('请确保“采集主体”、“消耗类型”及“关联信息”已完整填写且数值大于0。');
-      return;
+    if (isPayeeSectionActive && payeeType === 'PETTY_SETTLE') {
+      if (!recordedCollectorId && !isSysCollector) {
+        showAlert('请选择【采集主体】。');
+        return;
+      }
+      if (originalBorrowAmount <= 0 && invoiceTotal <= 0) {
+        showAlert('请输入【原借款积分】或添加【发票明细】。');
+        return;
+      }
+    } else {
+      if ((!isD && !selectedMiningId) || !selectedType || (!recordedCollectorId && !isSysCollector && !isD) || dynamicCost <= 0) {
+        showAlert('请确保“采集主体”、“消耗类型”及“关联信息”已完整填写且数值大于0。');
+        return;
+      }
     }
 
-    const isPayeeSectionActive = isB2 || isD;
-    if (isPayeeSectionActive && payeeType === 'SUPPLIER' && !payeeName.trim()) {
-      showAlert('请填写“供应商名称”。');
-      return;
+    if (isPayeeSectionActive) {
+      if (payeeType === 'EMPLOYEE' && (!payeeName.trim() || !payeeUserId)) {
+        showAlert('请选择“收方采集主体”（采集主体代付）。');
+        return;
+      }
+      if (payeeType === 'SUPPLIER' && !payeeName.trim()) {
+        showAlert('请填写“供应商名称”。');
+        return;
+      }
+      if (payeeType === 'PETTY_SETTLE' && (!recordedCollectorId && !payeeUserId)) {
+        showAlert('请选择“借支/报销采集主体”。');
+        return;
+      }
     }
 
     const categoryLabel = costCategory === 'B' && valueConsumptionMode === 'B2' ? 'B2' : costCategory;
     const mineNotice = isD ? '【归属】经营单元公摊（无项目列支）' : `【矿山】${selectedMiningId}`;
-    const effectivePayeeType = isPayeeSectionActive && payeeType === 'SUPPLIER' ? 'SUPPLIER' : 'EMPLOYEE';
-    const effectivePayeeName = effectivePayeeType === 'SUPPLIER' ? payeeName.trim() : '';
-    const payeeNotice = effectivePayeeType === 'SUPPLIER' ? `\n【支付对象】供应商直付 (${effectivePayeeName})` : '';
+    const effectivePayeeType = isPayeeSectionActive ? payeeType : 'EMPLOYEE';
+    
+    // 提炼纯姓名（户名，无业务后缀）
+    let purePayeeName = '';
+    let purePayeeUserId: string | undefined = undefined;
+
+    if (effectivePayeeType === 'SUPPLIER') {
+      purePayeeName = payeeName.trim();
+    } else if (effectivePayeeType === 'PETTY_SETTLE') {
+      const cUser = users.find(u => u.id === recordedCollectorId || u.id === payeeUserId);
+      purePayeeName = cUser ? (cUser.name || cUser.userId) : payeeName.trim();
+      purePayeeUserId = cUser ? cUser.id : (payeeUserId || recordedCollectorId);
+    } else {
+      // EMPLOYEE
+      if (payeeUserId) {
+        const pUser = users.find(u => u.id === payeeUserId);
+        purePayeeName = pUser ? (pUser.name || pUser.userId) : payeeName.trim();
+        purePayeeUserId = payeeUserId;
+      } else {
+        const cUser = users.find(u => u.id === recordedCollectorId);
+        purePayeeName = cUser ? (cUser.name || cUser.userId) : (user.name || user.userId);
+        purePayeeUserId = cUser ? cUser.id : user.id;
+      }
+    }
+
+    const effectiveDynamicCost = effectivePayeeType === 'PETTY_SETTLE'
+      ? (invoiceTotal > 0 ? invoiceTotal : originalBorrowAmount)
+      : dynamicCost;
+
+    const payeeNotice = effectivePayeeType === 'SUPPLIER' 
+      ? `\n【支付对象】直付供应商 (${purePayeeName})` 
+      : (effectivePayeeType === 'PETTY_SETTLE'
+          ? `\n【支付对象】借支平账 (${purePayeeName})\n【原预借积分】${originalBorrowAmount.toLocaleString()}\n【发票合计】${invoiceTotal.toLocaleString()}\n【差额】${diffAmount.toLocaleString()} (${diffAmount > 0 && needBankMatch ? '需流水校验' : '强锁隔离不关联流水'})`
+          : `\n【支付对象】采集主体代付 (${purePayeeName})`);
 
     showConfirm(
-      `确定提报动态消耗申请？\n\n【类别】${categoryLabel}类消耗\n${mineNotice}${payeeNotice}\n【数值】${Math.round(dynamicCost).toLocaleString()}\n【归属月份】${businessMonth}`,
+      `确定提报动态消耗申请？\n\n【类别】${categoryLabel}类消耗\n${mineNotice}${payeeNotice}\n【数值】${Math.round(effectiveDynamicCost).toLocaleString()}\n【归属月份】${businessMonth}`,
       async () => {
         const status = AuditStatus.Pending;
         const confirmationType = '消耗确权';
@@ -448,11 +559,16 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
           costCategory: selectedType === RefineType.NonEffectiveHours ? undefined : costCategory,
           valueConsumptionMode: selectedCategory === RefineCategory.Value && costCategory === 'B' ? valueConsumptionMode : undefined,
           payeeType: effectivePayeeType,
-          payeeName: effectivePayeeName,
+          payMethod: effectivePayeeType === 'PETTY_SETTLE' ? 'PETTY_SETTLE' : undefined,
+          payeeName: purePayeeName,
+          payeeUserId: purePayeeUserId,
+          needBankMatch: effectivePayeeType === 'PETTY_SETTLE' ? (diffAmount > 0 && needBankMatch) : true,
+          originalBorrowAmount: effectivePayeeType === 'PETTY_SETTLE' ? originalBorrowAmount : undefined,
+          invoices: effectivePayeeType === 'PETTY_SETTLE' ? invoices.filter(i => i.invoiceNo.trim() || i.amount > 0) : undefined,
           amount: 0,
           rawAmount: 0,
-          dynamicCost: dynamicCost,
-          netValue: isD ? -dynamicCost : calculatedNetValue,
+          dynamicCost: effectiveDynamicCost,
+          netValue: isD ? -effectiveDynamicCost : calculatedNetValue,
           timestamp: Date.now(),
           businessDate: businessDate,
           month: businessDate.slice(0, 7),
@@ -464,6 +580,10 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
         setDynamicCost(0);
         setPayeeType('EMPLOYEE');
         setPayeeName('');
+        setPayeeUserId('');
+        setOriginalBorrowAmount(0);
+        setInvoices([{ id: '1', invoiceNo: '', amount: 0 }]);
+        setNeedBankMatch(false);
         
         const nextDtcb = [...dtcbLogsToUse, newLog];
         const payload = isGlobalReader(user) ? nextDtcb : [newLog];
@@ -570,7 +690,9 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
         '提报时间': formatSubmissionTime(log.timestamp),
         '矿山编号': log.miningId,
         '采集主体': formatCollectorDisplay(log.recordedCollectorId, users),
-        '支付对象': log.payeeType === 'SUPPLIER' ? `供应商直付 (${log.payeeName || '-'})` : '员工代付',
+        '支付对象类别': log.payeeType === 'SUPPLIER' ? '直付供应商' : (log.payeeType === 'PETTY_SETTLE' || log.payMethod === 'PETTY_SETTLE') ? '借支平账' : '采集主体代付',
+        '对方户名': log.payeeName || '-',
+        '是否流水校验': log.needBankMatch ? '是' : '否',
         '非效对冲': (log.type === RefineType.NonEffectiveHours || isNonEffectiveHoursEffective(log)) ? Math.round(getNonEffectiveHoursDeduction(log)) : 0,
         'A': log.costCategory === 'A' ? Math.round(log.dynamicCost) : 0,
         'C': log.costCategory === 'C' ? Math.round(log.dynamicCost) : 0,
@@ -1105,7 +1227,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                     支付对象 <span className="text-rose-500 ml-1 font-bold">*</span>
                   </label>
                   <span className="text-[11px] text-slate-400">
-                    {payeeType === 'EMPLOYEE' ? '默认关联采集主体' : '须填写供应商名称'}
+                    {payeeType === 'EMPLOYEE' ? '关联代付收款员工' : payeeType === 'SUPPLIER' ? '须填写供应商全称' : '发票扫码核销平账'}
                   </span>
                 </div>
 
@@ -1116,6 +1238,7 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                     onClick={() => {
                       setPayeeType('EMPLOYEE');
                       setPayeeName('');
+                      setPayeeUserId('');
                     }}
                     className={`px-3 py-1.5 text-xs font-bold rounded transition-all cursor-pointer ${
                       payeeType === 'EMPLOYEE'
@@ -1123,22 +1246,70 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    员工代付
+                    采集主体代付
                   </button>
                   <button
                     type="button"
-                    onClick={() => setPayeeType('SUPPLIER')}
+                    onClick={() => {
+                      setPayeeType('SUPPLIER');
+                      setPayeeName('');
+                      setPayeeUserId('');
+                    }}
                     className={`px-3 py-1.5 text-xs font-bold rounded transition-all cursor-pointer ${
                       payeeType === 'SUPPLIER'
                         ? 'bg-white text-blue-600 shadow-xs border border-slate-200/50'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    供应商直付
+                    直付供应商
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPayeeType('PETTY_SETTLE');
+                      setPayeeName('');
+                      setPayeeUserId('');
+                    }}
+                    className={`px-3 py-1.5 text-xs font-bold rounded transition-all cursor-pointer ${
+                      payeeType === 'PETTY_SETTLE'
+                        ? 'bg-white text-blue-600 shadow-xs border border-slate-200/50'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    借支平账
                   </button>
                 </div>
 
-                {/* 选中【供应商直付】平滑展开文本输入框 */}
+                {/* 选中【采集主体代付】展开收方采集主体下拉 */}
+                {payeeType === 'EMPLOYEE' && (
+                  <div className="space-y-1.5 pt-1 animate-in fade-in slide-in-from-top-1 duration-200">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center h-4">
+                        收方采集主体 <span className="text-rose-500 ml-1 font-bold">*</span>
+                      </label>
+                    </div>
+                    <select
+                      value={payeeUserId}
+                      onChange={(e) => {
+                        const uId = e.target.value;
+                        setPayeeUserId(uId);
+                        const u = users.find(user => user.id === uId);
+                        setPayeeName(u ? (u.name || u.userId) : '');
+                      }}
+                      className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all cursor-pointer h-10"
+                      required={payeeType === 'EMPLOYEE'}
+                    >
+                      <option value="">选择代付采集主体...</option>
+                      {collectorPool.map(u => (
+                        <option key={u.id} value={u.id}>
+                          {u.name || u.userId} ({u.category || getRoleChineseName(u.role)})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* 选中【直付供应商】平滑展开文本输入框 */}
                 {payeeType === 'SUPPLIER' && (
                   <div className="space-y-1.5 pt-1 animate-in fade-in slide-in-from-top-1 duration-200">
                     <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center h-4">
@@ -1152,6 +1323,160 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                       className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all h-10 placeholder:text-slate-400 placeholder:font-normal"
                       required={payeeType === 'SUPPLIER'}
                     />
+                  </div>
+                )}
+
+                {/* 选中【借支平账】平滑展开核销明细与防护逻辑 */}
+                {payeeType === 'PETTY_SETTLE' && (
+                  <div className="space-y-4 pt-1 animate-in fade-in slide-in-from-top-1 duration-200 bg-slate-50/70 p-3.5 rounded-lg border border-slate-200/80">
+                    {/* 1. 预借采集主体下拉框（必填） */}
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between">
+                        <span>预借采集主体 <span className="text-rose-500 font-bold">*</span></span>
+                        <span className="text-[10px] text-slate-400 font-normal">借支申请人/经办人</span>
+                      </label>
+                      <select
+                        value={recordedCollectorId}
+                        onChange={(e) => {
+                          const uId = e.target.value;
+                          setRecordedCollectorId(uId);
+                          setPayeeUserId(uId);
+                          const u = users.find(user => user.id === uId);
+                          setPayeeName(u ? (u.name || u.userId) : '');
+                        }}
+                        className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] font-bold text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all cursor-pointer h-10"
+                        required={payeeType === 'PETTY_SETTLE'}
+                      >
+                        <option value="">选择借支/报销采集主体...</option>
+                        {collectorPool.map(u => (
+                          <option key={u.id} value={u.id}>
+                            {formatCollectorDisplay(u)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* 2. 原预借积分输入框 */}
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between">
+                        <span>原预借积分 <span className="text-rose-500 font-bold">*</span></span>
+                        <span className="text-[10px] text-slate-400 font-normal">此前预借支取的积分金额</span>
+                      </label>
+                      <input
+                        type="number"
+                        value={originalBorrowAmount || ''}
+                        onChange={(e) => setOriginalBorrowAmount(Number(e.target.value))}
+                        placeholder="请输入此前原预借数值..."
+                        className="w-full bg-white border border-slate-200 rounded-md px-3 py-2 text-[13px] font-mono font-bold text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 transition-all h-10 placeholder:text-slate-400 placeholder:font-normal"
+                        required={payeeType === 'PETTY_SETTLE'}
+                      />
+                    </div>
+
+                    {/* 3. 发票明细列表（支持扫码枪连续录入） */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center">
+                          发票明细 <span className="text-slate-400 text-[10px] font-normal ml-2">(支持扫码枪回车连续录入)</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={handleAddInvoice}
+                          className="px-2 py-1 bg-white hover:bg-slate-100 text-blue-600 border border-slate-200 rounded text-[11px] font-bold transition-all flex items-center gap-1 cursor-pointer"
+                        >
+                          + 添加发票行
+                        </button>
+                      </div>
+
+                      <div className="space-y-2">
+                        {invoices.map((inv, idx) => (
+                          <div key={inv.id} className="flex items-center gap-2">
+                            <div className="flex-1">
+                              <input
+                                type="text"
+                                value={inv.invoiceNo}
+                                onChange={(e) => handleInvoiceChange(inv.id, 'invoiceNo', e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    handleAddInvoice();
+                                  }
+                                }}
+                                placeholder={`发票号码 ${idx + 1}...`}
+                                className="w-full bg-white border border-slate-200 rounded-md px-2.5 py-1.5 text-xs font-mono font-bold text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 h-9 placeholder:text-slate-400 placeholder:font-normal"
+                              />
+                            </div>
+                            <div className="w-32">
+                              <input
+                                type="number"
+                                value={inv.amount || ''}
+                                onChange={(e) => handleInvoiceChange(inv.id, 'amount', Number(e.target.value))}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    handleAddInvoice();
+                                  }
+                                }}
+                                placeholder="发票数值..."
+                                className="w-full bg-white border border-slate-200 rounded-md px-2.5 py-1.5 text-xs font-mono font-bold text-right text-slate-800 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/10 h-9 placeholder:text-slate-400 placeholder:font-normal"
+                              />
+                            </div>
+                            {invoices.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveInvoice(inv.id)}
+                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-all cursor-pointer"
+                                title="删除该发票"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* 4. 数值/金额联动计算卡片 */}
+                    <div className="bg-white p-3 rounded-md border border-slate-200 space-y-2 text-xs">
+                      <div className="flex items-center justify-between text-slate-600 font-medium">
+                        <span>发票合计:</span>
+                        <span className="font-mono font-bold text-slate-800">{invoiceTotal}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-slate-600 font-medium">
+                        <span>原预借积分:</span>
+                        <span className="font-mono font-bold text-slate-800">{originalBorrowAmount}</span>
+                      </div>
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-100 font-bold">
+                        <span>差额 (发票合计 - 原预借):</span>
+                        <span className={`font-mono ${diffAmount > 0 ? 'text-amber-600' : diffAmount < 0 ? 'text-emerald-600' : 'text-slate-700'}`}>
+                          {diffAmount > 0 ? `+${diffAmount} (需补发打款)` : diffAmount}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* 5. 银行流水校验智能隔离勾选框 */}
+                    <div className="p-2.5 rounded-md border transition-all">
+                      {diffAmount > 0 ? (
+                        <label className="flex items-start gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={needBankMatch}
+                            onChange={(e) => setNeedBankMatch(e.target.checked)}
+                            className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 h-4 w-4"
+                          />
+                          <div className="text-xs">
+                            <span className="font-bold text-amber-800">本次产生差额打款，需纳入银行流水校验</span>
+                            <p className="text-[11px] text-amber-600/90 leading-tight mt-0.5">
+                              因发票总额大于原预借，需补发资金打款给员工。勾选后将纳入财务银行流水比对。
+                            </p>
+                          </div>
+                        </label>
+                      ) : (
+                        <div className="flex items-center gap-2 text-xs text-slate-400 bg-slate-100/80 p-2 rounded border border-slate-200">
+                          <span className="text-slate-400">🔒</span>
+                          <span>差额 ≤ 0，无需资金打款，已强锁隔离（不纳入银行流水校验）</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -1305,9 +1630,20 @@ const DynamicConsumption: React.FC<DynamicConsumptionProps> = ({
                     </td>
                     <td className="px-3 py-3 border-r border-slate-100 whitespace-nowrap min-w-[130px]">
                       <div className="font-bold text-slate-700 whitespace-nowrap">{formatCollectorDisplay(log.recordedCollectorId, users)}</div>
-                      {log.payeeType === 'SUPPLIER' && log.payeeName && (
-                        <div className="text-[9px] font-bold text-blue-600 truncate max-w-[150px]" title={`供应商/收款企业: ${log.payeeName}`}>
-                          直付: {log.payeeName}
+                      {log.payeeName && (
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${
+                            log.payeeType === 'SUPPLIER'
+                              ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                              : (log.payeeType === 'PETTY_SETTLE' || log.payMethod === 'PETTY_SETTLE')
+                              ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                              : 'bg-blue-50 text-blue-700 border border-blue-200'
+                          }`}>
+                            {log.payeeType === 'SUPPLIER' ? '直付供应商' : (log.payeeType === 'PETTY_SETTLE' || log.payMethod === 'PETTY_SETTLE') ? '借支平账' : '采集主体代付'}
+                          </span>
+                          <span className="text-[10px] font-bold text-slate-800 truncate max-w-[120px]" title={`对方户名: ${log.payeeName}`}>
+                            {log.payeeName}
+                          </span>
                         </div>
                       )}
                       <div className="text-[9px] text-slate-400 font-normal whitespace-nowrap">{log.type}</div>
